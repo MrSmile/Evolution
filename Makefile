@@ -1,5 +1,5 @@
 
-HEADER = world.h
+HEADER = math.h world.h
 SOURCE = world.cpp main.cpp
 FLAGS = -std=c++11 -Wall -Wno-parentheses
 D_FLAGS = -g -O0 -DDEBUG
