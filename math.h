@@ -22,20 +22,10 @@ typedef uint8_t angle_t;
 constexpr angle_t flip_angle = 128;
 constexpr angle_t angle_90 = 64;
 
-inline angle_t calc_angle(int32_t dx, int32_t dy)
-{
-    return 0;  // TODO
-}
+int32_t r_sin(uint32_t r_x4, angle_t angle);
+angle_t calc_angle(int32_t dx, int32_t dy);
+uint8_t calc_radius(uint64_t r2);
 
-inline uint8_t calc_radius(uint64_t r2)
-{
-    return 0;  // TODO
-}
-
-inline int32_t r_sin(uint32_t r_x4, angle_t angle)
-{
-    return 0;  // TODO
-}
 
 
 class Random
