@@ -11,6 +11,8 @@ using std::int32_t;  using std::uint32_t;
 using std::int64_t;  using std::uint64_t;
 
 
+constexpr double pi = 3.14159265358979323846264338327950288;
+
 
 constexpr int tile_order = 30;
 constexpr uint32_t tile_size = 1ul << tile_order;

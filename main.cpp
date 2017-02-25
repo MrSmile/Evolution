@@ -1,9 +1,7 @@
 // main.cpp : entry point
 //
 
-#include "world.h"
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_opengl.h>
+#include "graph.h"
 #include <cstdio>
 
 
@@ -37,28 +35,38 @@ bool main_loop(SDL_Window *window)
     glEnable(GL_FRAMEBUFFER_SRGB);  glEnable(GL_MULTISAMPLE);
     glEnable(GL_CULL_FACE);
 
+    World world;
+    Camera cam(window);
+    Representation graph;
+    graph.update(world);
+
     if(!check_gl_error())return false;
 
     for(SDL_Event evt;;)
     {
         if(!SDL_PollEvent(&evt))
         {
+            cam.apply();
             glClearColor(0.0, 0.0, 0.0, 1.0);  glClear(GL_COLOR_BUFFER_BIT);
+            graph.draw(world, cam);  if(!check_gl_error())return false;
             SDL_GL_SwapWindow(window);  continue;
         }
         switch(evt.type)
         {
         case SDL_MOUSEMOTION:
             if(!(evt.motion.state & SDL_BUTTON(1)))continue;
-            break;
+            cam.move(evt.motion.xrel, evt.motion.yrel);  break;
 
         case SDL_MOUSEWHEEL:
-            break;
+            cam.rescale(evt.wheel.y);  break;
 
         case SDL_WINDOWEVENT:
-            if(evt.window.event == SDL_WINDOWEVENT_RESIZED)
-                glViewport(0, 0, evt.window.data1, evt.window.data2);
-            break;
+            if(evt.window.event != SDL_WINDOWEVENT_RESIZED)continue;
+            cam.resize(evt.window.data1, evt.window.data2);  break;
+
+        case SDL_KEYDOWN:
+            if(evt.key.keysym.sym != SDLK_SPACE)continue;
+            world.next_step();  graph.update(world);  break;
 
         case SDL_QUIT:
             return true;
@@ -87,7 +95,7 @@ int init()
 
     if(SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1))return sdl_error("Failed to enable double-buffering: ");
     //if(SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24))return sdl_error("Failed to enable depth buffer: ");
-    //if(SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1))return sdl_error("Failed to enable sRGB framebuffer: ");
+    if(SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1))return sdl_error("Failed to enable sRGB framebuffer: ");
     if(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1) || SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4))
         return sdl_error("Failed to enable multisampling: ");
 

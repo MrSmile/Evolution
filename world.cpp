@@ -40,13 +40,13 @@ void Detector::update(uint64_t r2, Creature *cr)
 
 // Food struct
 
-Food::Food(Type type, uint64_t x, uint64_t y) : type(type), pos{x, y}
-{
-}
-
-Food::Food(const Config &config, const Food &food) : type(food.type), pos(food.pos)
+Food::Food(const Config &config, Type type, const Position &pos) : type(type), pos(pos)
 {
     eater.reset(config.base_r2);
+}
+
+Food::Food(const Config &config, const Food &food) : Food(config, food.type > Sprout ? food.type : Grass, food.pos)
+{
 }
 
 
@@ -119,14 +119,16 @@ void Creature::process_detectors(Creature *cr1, Creature *cr2)
 
 void Creature::process_food(Food *food, size_t n)
 {
-    assert(flags & f_eating);
-    for(size_t i = 0; i < n; i++)
+    if(!(flags & f_eating))return;
+    for(size_t i = 0; i < n; i++)if(food[i].type > Food::Sprout)
     {
         int32_t dx = pos.x - food[i].pos.x;
         int32_t dy = pos.y - food[i].pos.y;
         uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
         food[i].eater.update(r2, this);
     }
+
+    // TODO: eyes
 }
 
 void Creature::post_process()
@@ -192,17 +194,19 @@ uint32_t Creature::execute_step(const Config &config)
 
 // World struct
 
-World::Tile::Tile(uint64_t seed, size_t index) : rand(seed, index), first(nullptr), last(&first), spawn_start(0)
+World::Tile::Tile(uint64_t seed, size_t index) :
+    rand(seed, index), first(nullptr), last(&first), spawn_start(0)
 {
 }
 
-World::Tile::Tile(const Config &config, const Tile &old, size_t reserve) : rand(old.rand), first(nullptr), last(&first)
+World::Tile::Tile(const Config &config, const Tile &old, size_t &total_food, size_t reserve) :
+    rand(old.rand), first(nullptr), last(&first)
 {
     foods.reserve(old.foods.size() + reserve);
     for(const auto &food : old.foods)
         if(food.eater.target)food.eater.target->energy += config.food_energy;
         else if(food.type)foods.emplace_back(config, food);
-    spawn_start = foods.size();
+    total_food += spawn_start = foods.size();
 }
 
 World::Tile::~Tile()
@@ -214,7 +218,7 @@ World::Tile::~Tile()
 }
 
 
-World::World() : spawn_per_tile(4), next_id(0)
+World::World() : total_food_count(0), spawn_per_tile(4), next_id(0)
 {
     config.order_x = config.order_y = 8;  // 256 x 256
     config.base_radius = tile_size / 128;
@@ -255,7 +259,7 @@ void World::spawn_grass(Tile &tile, uint32_t x, uint32_t y)
     {
         uint64_t xx = (tile.rand.uint32() & tile_mask) | offs_x;
         uint64_t yy = (tile.rand.uint32() & tile_mask) | offs_y;
-        tile.foods.emplace_back(Food::Grass, xx, yy);
+        tile.foods.emplace_back(config, Food::Sprout, Position{xx, yy});
     }
     for(size_t i = 0; i < tile.spawn_start; i++)
     {
@@ -269,7 +273,7 @@ void World::spawn_grass(Tile &tile, uint32_t x, uint32_t y)
             pos.y += r_sin(config.sprout_dist_x4, angle);
             size_t index = tile_index(pos);
 
-            tiles[index].foods.emplace_back(Food::Grass, pos.x, pos.y);
+            tiles[index].foods.emplace_back(config, Food::Sprout, pos);
         }
     }
 }
@@ -279,8 +283,8 @@ void World::spawn_meat(Tile &tile, Position pos, uint32_t energy)
     if(energy < config.food_energy)return;
     for(energy -= config.food_energy;;)
     {
-        size_t index = tile_index(pos);
-        tiles[index].foods.emplace_back(Food::Meat, pos.x, pos.y);
+        size_t index = tile_index(pos);  total_food_count++;
+        tiles[index].foods.emplace_back(config, Food::Meat, pos);
         if(energy < config.food_energy)return;
         energy -= config.food_energy;
 
@@ -297,16 +301,21 @@ void World::process_tile_pair(Tile &tile1, Tile &tile2)
             if(cr1 != cr2)Creature::process_detectors(cr1, cr2);
 
     for(Creature *cr = tile1.first; cr; cr = cr->next)
-        cr->process_food(tile2.foods.data(), tile2.spawn_start);
+        cr->process_food(tile2.foods.data(), tile2.foods.size());
 
     for(Creature *cr = tile2.first; cr; cr = cr->next)
-        cr->process_food(tile1.foods.data(), tile1.spawn_start);
+        cr->process_food(tile1.foods.data(), tile1.foods.size());
+
+    // TODO: process sprouts
 }
 
 void World::next_step()
 {
     std::vector<Tile> old;  old.reserve(tiles.size());  old.swap(tiles);
-    for(size_t i = 0; i < old.size(); i++)tiles.emplace_back(config, old[i], spawn_per_tile);
+
+    total_food_count = 0;
+    for(size_t i = 0; i < old.size(); i++)
+        tiles.emplace_back(config, old[i], total_food_count, spawn_per_tile);
 
     for(size_t i = 0; i < old.size(); i++)
     {

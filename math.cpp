@@ -33,8 +33,6 @@ int32_t r_sin(uint32_t r_x4, angle_t angle)
 
 void generate_table()
 {
-    constexpr double pi = 3.14159265358979323846264338327950288;
-
     for(unsigned i = 0; i <= angle_90; i++)
     {
         if(!(i % 8))std::printf("\n   ");

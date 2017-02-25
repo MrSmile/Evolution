@@ -54,14 +54,14 @@ struct Food
 {
     enum Type
     {
-        Sprout, Grass, Meat
+        Dead, Sprout, Grass, Meat
     };
 
     Type type;
     Position pos;
     Detector eater;
 
-    Food(Type type, uint64_t x, uint64_t y);
+    Food(const Config &config, Type type, const Position &pos);
     Food(const Config &config, const Food &food);
 };
 
@@ -214,13 +214,14 @@ struct World
         size_t spawn_start;
 
         Tile(uint64_t seed, size_t index);
-        Tile(const Config &config, const Tile &old, size_t reserve);
+        Tile(const Config &config, const Tile &old, size_t &total_food, size_t reserve);
         ~Tile();
     };
 
 
     Config config;
     std::vector<Tile> tiles;
+    size_t total_food_count;
     size_t spawn_per_tile;
     uint64_t next_id;
 
