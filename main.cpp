@@ -42,10 +42,15 @@ bool main_loop(SDL_Window *window)
 
     if(!check_gl_error())return false;
 
+    bool play = false;
     for(SDL_Event evt;;)
     {
         if(!SDL_PollEvent(&evt))
         {
+            if(play)
+            {
+                world.next_step();  graph.update(world);
+            }
             cam.apply();
             glClearColor(0.0, 0.0, 0.0, 1.0);  glClear(GL_COLOR_BUFFER_BIT);
             graph.draw(world, cam);  if(!check_gl_error())return false;
@@ -65,8 +70,19 @@ bool main_loop(SDL_Window *window)
             cam.resize(evt.window.data1, evt.window.data2);  break;
 
         case SDL_KEYDOWN:
-            if(evt.key.keysym.sym != SDLK_SPACE)continue;
-            world.next_step();  graph.update(world);  break;
+            switch(evt.key.keysym.sym)
+            {
+            case SDLK_SPACE:
+                play = !play;  break;
+
+            case SDLK_RIGHT:
+                world.next_step();  graph.update(world);
+                play = false;  break;
+
+            default:
+                continue;
+            }
+            break;
 
         case SDL_QUIT:
             return true;

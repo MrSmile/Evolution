@@ -63,6 +63,8 @@ struct Food
 
     Food(const Config &config, Type type, const Position &pos);
     Food(const Config &config, const Food &food);
+
+    void check_grass(const Config &config, const Food *food, size_t n);
 };
 
 
@@ -93,6 +95,8 @@ struct Creature
     enum Flags : uint8_t
     {
         f_eating = 1 << 0,
+        f_grass  = 1 << 2,  // 1 << Food::Grass
+        f_meat   = 1 << 3,  // 1 << Food::Meat
     };
 
 
@@ -195,9 +199,10 @@ struct Creature
     static Creature *spawn(uint64_t id, const Position &pos, angle_t angle, uint32_t energy, const Creature &parent);
 
     void pre_process(const Config &config);
+    void update_view(uint8_t flags, uint64_t r2, angle_t test);
     void process_detectors(Creature *cr, uint64_t r2, angle_t dir);
     static void process_detectors(Creature *cr1, Creature *cr2);
-    void process_food(Food *food, size_t n);
+    void process_food(std::vector<Food> &foods);
     void post_process();
 
     uint32_t execute_step(const Config &config);

@@ -50,6 +50,21 @@ Food::Food(const Config &config, const Food &food) : Food(config, food.type > Sp
 }
 
 
+void Food::check_grass(const Config &config, const Food *food, size_t n)
+{
+    if(type != Sprout)return;
+
+    for(size_t i = 0; i < n; i++)if(food[i].type == Grass)
+    {
+        int32_t dx = pos.x - food[i].pos.x;
+        int32_t dy = pos.y - food[i].pos.y;
+        uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
+        if(r2 >= config.repression_r2)continue;
+        type = Dead;  return;
+    }
+}
+
+
 
 // Genome struct
 
@@ -81,23 +96,27 @@ void Creature::pre_process(const Config &config)
     damage = 0;
 }
 
-void Creature::process_detectors(Creature *cr, uint64_t r2, angle_t dir)
+void Creature::update_view(uint8_t flags, uint64_t r2, angle_t test)
 {
-    father.update(r2, cr);
-    angle_t test = dir - angle;
-    for(auto &eye : eyes)if(eye.flags & cr->flags)
+    for(auto &eye : eyes)if(eye.flags & flags)
     {
         if(angle_t(test - eye.angle) > eye.delta)continue;
         if(r2 >= uint64_t(eye.radius) * eye.radius)continue;
         eye.count++;
     }
-    if(!r2)return;  // invalid angle
-    for(auto &radar : radars)if(radar.flags & cr->flags)
+    for(auto &radar : radars)if(radar.flags & flags)
     {
         if(angle_t(test - radar.angle) > radar.delta)continue;
         radar.min_r2 = std::min(radar.min_r2, r2);
     }
-    test = angle_t(dir - cr->angle) ^ flip_angle;
+}
+
+void Creature::process_detectors(Creature *cr, uint64_t r2, angle_t dir)
+{
+    father.update(r2, cr);  if(!r2)return;  // invalid angle
+
+    update_view(cr->flags, r2, dir - angle);
+    angle_t test = angle_t(dir - cr->angle) ^ flip_angle;
     for(const auto &claw : cr->claws)if(claw.active)
     {
         if(angle_t(test - claw.angle) > claw.delta)continue;
@@ -117,18 +136,18 @@ void Creature::process_detectors(Creature *cr1, Creature *cr2)
     cr2->process_detectors(cr1, r2, angle ^ flip_angle);
 }
 
-void Creature::process_food(Food *food, size_t n)
+void Creature::process_food(std::vector<Food> &foods)
 {
-    if(!(flags & f_eating))return;
-    for(size_t i = 0; i < n; i++)if(food[i].type > Food::Sprout)
+    for(auto &food : foods)if(food.type > Food::Sprout)
     {
-        int32_t dx = pos.x - food[i].pos.x;
-        int32_t dy = pos.y - food[i].pos.y;
+        int32_t dx = food.pos.x - pos.x;
+        int32_t dy = food.pos.y - pos.y;
         uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
-        food[i].eater.update(r2, this);
-    }
+        if(flags & f_eating)food.eater.update(r2, this);
+        if(!r2)continue;  // invalid angle
 
-    // TODO: eyes
+        update_view(1 << food.type, r2, calc_angle(dx, dy) - angle);
+    }
 }
 
 void Creature::post_process()
@@ -220,19 +239,19 @@ World::Tile::~Tile()
 
 World::World() : total_food_count(0), spawn_per_tile(4), next_id(0)
 {
-    config.order_x = config.order_y = 8;  // 256 x 256
-    config.base_radius = tile_size / 128;
+    config.order_x = config.order_y = 5;  // 32 x 32
+    config.base_radius = tile_size / 64;
     config.food_energy = 1024;
     config.input_level = 16;
-    config.exp_sprout_per_tile = 0x0FFFFFFF;
-    config.exp_sprout_per_grass = 0x0FFFFFFF;
-    config.repression_range = tile_size / 128;
+    config.exp_sprout_per_tile = 0xEFFFFFFF;
+    config.exp_sprout_per_grass = 0xEFFFFFFF;
+    config.repression_range = tile_size / 16;
     config.sprout_dist_x4 = 5 * config.repression_range;
-    config.meat_dist_x4 = tile_size / 128;
+    config.meat_dist_x4 = tile_size / 64;
     config.calc_derived();
 
     uint64_t seed = 1234;
-    uint32_t exp_grass_gen = uint32_t(-1) >> 6;
+    uint32_t exp_grass_gen = uint32_t(-1) >> 16;
 
     size_t size = size_t(1) << (config.order_x + config.order_y);
     std::swap(config.exp_sprout_per_tile, exp_grass_gen);  tiles.reserve(size);
@@ -301,12 +320,16 @@ void World::process_tile_pair(Tile &tile1, Tile &tile2)
             if(cr1 != cr2)Creature::process_detectors(cr1, cr2);
 
     for(Creature *cr = tile1.first; cr; cr = cr->next)
-        cr->process_food(tile2.foods.data(), tile2.foods.size());
+        cr->process_food(tile2.foods);
 
     for(Creature *cr = tile2.first; cr; cr = cr->next)
-        cr->process_food(tile1.foods.data(), tile1.foods.size());
+        cr->process_food(tile1.foods);
 
-    // TODO: process sprouts
+    for(size_t i = tile1.spawn_start; i < tile1.foods.size(); i++)
+        tile1.foods[i].check_grass(config, tile2.foods.data(), tile2.spawn_start);
+
+    for(size_t i = tile2.spawn_start; i < tile2.foods.size(); i++)
+        tile2.foods[i].check_grass(config, tile1.foods.data(), tile1.spawn_start);
 }
 
 void World::next_step()
