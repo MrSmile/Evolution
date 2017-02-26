@@ -87,6 +87,7 @@ struct Genome
 {
     // TODO
 
+    Genome();
     Genome(const Genome &parent, const Genome *father);
 };
 
@@ -123,14 +124,22 @@ struct Creature
 
     struct Stomach
     {
-        uint32_t capacity;
-        uint32_t mul;  // = ceil((255 << 24) / capacity)
+        uint32_t capacity, mul;
+
+        Stomach(uint32_t capacity) : capacity(capacity)
+        {
+            mul = ((255ul << 24) - 1) / capacity + 1;
+        }
     };
 
     struct Hide
     {
-        uint32_t life, capacity, regen;
-        uint32_t mul;  // = ceil((255 << 24) / capacity)
+        uint32_t life, max_life, regen, mul;
+
+        Hide(uint32_t max_life, uint32_t regen) : life(max_life), max_life(max_life), regen(regen)
+        {
+            mul = ((255ul << 24) - 1) / max_life + 1;
+        }
     };
 
     struct Eye
@@ -168,8 +177,9 @@ struct Creature
 
     Position pos;
     angle_t angle;
+    uint32_t passive_energy;
     uint32_t energy, max_energy, passive_cost;
-    uint32_t passive_energy, damage;
+    uint32_t total_life, max_life, damage;
     Detector father;
     uint8_t flags;
 
@@ -195,6 +205,7 @@ struct Creature
     Creature(const Creature &) = delete;
     Creature &operator = (const Creature &) = delete;
 
+    Creature(uint64_t id, const Position &pos, angle_t angle, uint32_t energy);
     Creature(uint64_t id, const Position &pos, angle_t angle, uint32_t energy, const Creature &parent);
     static Creature *spawn(uint64_t id, const Position &pos, angle_t angle, uint32_t energy, const Creature &parent);
 
@@ -220,18 +231,18 @@ struct World
 
         Tile(uint64_t seed, size_t index);
         Tile(const Config &config, const Tile &old, size_t &total_food, size_t reserve);
-        ~Tile();
     };
 
 
     Config config;
     std::vector<Tile> tiles;
-    size_t total_food_count;
+    size_t total_food_count, total_creature_count;
     size_t spawn_per_tile;
     uint64_t next_id;
 
 
     World();
+    ~World();
     size_t tile_index(Position &pos) const;
     void spawn_grass(Tile &tile, uint32_t x, uint32_t y);
     void spawn_meat(Tile &tile, Position pos, uint32_t energy);

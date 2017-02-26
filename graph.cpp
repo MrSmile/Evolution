@@ -60,6 +60,19 @@ struct Vertex
     GLfloat x, y;
 };
 
+struct Triangle
+{
+    GLubyte p0, p1, p2;
+
+    Triangle()
+    {
+    }
+
+    Triangle(int p0, int p1, int p2) : p0(p0), p1(p1), p2(p2)
+    {
+    }
+};
+
 struct FoodData
 {
     GLfloat x, y, rad, type;
@@ -71,6 +84,28 @@ struct FoodData
     }
 };
 
+struct CreatureData
+{
+    GLfloat x, y, rad[3];
+    GLubyte angle, signal, energy, life;
+
+    CreatureData(const Config &config, const Creature &cr) :
+        x(cr.pos.x * draw_scale), y(cr.pos.y * draw_scale),
+        angle(cr.angle), signal(cr.flags)
+    {
+        constexpr GLfloat energy_mul = 1.0 / (1 << 16);
+        constexpr GLfloat life_mul   = 1.0 / (1 << 16);
+
+        GLfloat sqr = 1;  rad[0] = config.base_radius * draw_scale;
+        sqr += cr.max_energy * energy_mul;  rad[1] = rad[0] * sqrt(sqr);
+        sqr += cr.max_life * life_mul;      rad[2] = rad[0] * sqrt(sqr);
+
+        energy = std::lround(255.0 * cr.energy / cr.max_energy);
+        life = std::lround(255.0 * cr.total_life / cr.max_life);
+    }
+};
+
+
 GLuint load_shader(GLint type, const char *name, const unsigned char *data, GLint size)
 {
     GLuint shader = glCreateShader(type);  char msg[65536];  GLsizei len;
@@ -79,85 +114,151 @@ GLuint load_shader(GLint type, const char *name, const unsigned char *data, GLin
     if(len)std::printf("%s shader log:\n%s\n", name, msg);  return shader;
 }
 
-GLuint create_program()
+void Representation::create_program(Pass pass, const char *name,
+    const unsigned char *vert_src, unsigned vert_len, const unsigned char *frag_src, unsigned frag_len)
 {
-    GLuint prog = glCreateProgram();
-    GLuint vert = load_shader(GL_VERTEX_SHADER, "Vertex", shaders_food_vert, shaders_food_vert_len);
-    GLuint frag = load_shader(GL_FRAGMENT_SHADER, "Fragment", shaders_food_frag, shaders_food_frag_len);
-    glAttachShader(prog, vert);  glAttachShader(prog, frag);
+    prog[pass] = glCreateProgram();
+    GLuint vert = load_shader(GL_VERTEX_SHADER, "Vertex", vert_src, vert_len);
+    GLuint frag = load_shader(GL_FRAGMENT_SHADER, "Fragment", frag_src, frag_len);
+    glAttachShader(prog[pass], vert);  glAttachShader(prog[pass], frag);
 
     char msg[65536];  GLsizei len;
-    glLinkProgram(prog);  glGetProgramInfoLog(prog, sizeof(msg), &len, msg);
-    if(len)std::printf("Shader program log:\n%s\n", msg);
+    glLinkProgram(prog[pass]);  glGetProgramInfoLog(prog[pass], sizeof(msg), &len, msg);
+    if(len)std::printf("Shader program \"%s\" log:\n%s\n", name, msg);
 
-    glDetachShader(prog, vert);  glDetachShader(prog, frag);
-    glDeleteShader(vert);  glDeleteShader(frag);  return prog;
+    glDetachShader(prog[pass], vert);  glDetachShader(prog[pass], frag);
+    glDeleteShader(vert);  glDeleteShader(frag);
+
+    i_transform[pass] = glGetUniformLocation(prog[pass], "transform");
+}
+
+#define SHADER(src) #src, shaders_##src##_vert, shaders_##src##_vert_len, shaders_##src##_frag, shaders_##src##_frag_len
+
+
+void Representation::make_food_shape()
+{
+    constexpr int n = 3, m = 2 * n - 2;
+    elem_count[pass_food] = 3 * m + 3;
+    obj_count[pass_food] = 0;
+
+    Vertex vertex[2 * n];
+    for(int i = 0; i < 2 * n; i++)
+    {
+        double r = i & 1 ? 1.0 : 0.25;
+        vertex[i].x = r * std::sin(i * (pi / n));
+        vertex[i].y = r * std::cos(i * (pi / n));
+    }
+
+    Triangle triangle[m + 1];
+    for(int i = 0; i < m; i += 2)
+    {
+        triangle[i + 0] = Triangle(i, i + 1, i + 2);
+        triangle[i + 1] = Triangle(m, i,     i + 2);
+    }
+    triangle[m] = Triangle(m, m + 1, 0);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_food]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_food]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangle), triangle, GL_STATIC_DRAW);
+}
+
+void Representation::make_creature_shape()
+{
+    constexpr int n = 8;
+    elem_count[pass_creature] = 3 * n;
+    obj_count[pass_creature] = 0;
+
+    Vertex vertex[n + 1];
+    double r = 1 / std::cos(pi / n);
+    for(int i = 0; i < n; i++)
+    {
+        vertex[i].x = r * std::sin(i * (2 * pi / n));
+        vertex[i].y = r * std::cos(i * (2 * pi / n));
+    }
+    vertex[n].x = vertex[n].y = 0;
+
+    Triangle triangle[n];  triangle[0] = Triangle(n, n - 1, 0);
+    for(int i = 1; i < n; i++)triangle[i] = Triangle(n, i - 1, i);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_creature]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_creature]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangle), triangle, GL_STATIC_DRAW);
+}
+
+
+void register_attribute(GLuint index, int vec_size, GLenum type, GLboolean norm, size_t stride, size_t offs)
+{
+    glEnableVertexAttribArray(index);  if(index)glVertexAttribDivisor(index, 1);
+    glVertexAttribPointer(index, vec_size, type, norm, stride, reinterpret_cast<void *>(offs));
 }
 
 Representation::Representation()
 {
-    glGenVertexArrays(1, &vao);  glGenBuffers(3, vbo);
+    create_program(pass_food, SHADER(food));
+    create_program(pass_creature, SHADER(creature));
 
-    glBindVertexArray(vao);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vbo[2]);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);  glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), nullptr);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);  glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(FoodData), nullptr);
-    glVertexAttribDivisor(1, 1);  glBindVertexArray(0);
+    glGenVertexArrays(pass_count, arr);
+    glGenBuffers(buf_count, buf);
 
-    prog = create_program();
-    i_transform = glGetUniformLocation(prog, "transform");
+    glBindVertexArray(arr[pass_food]);
+    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_food]);
+    register_attribute(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), 0);
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);
+    register_attribute(1, 4, GL_FLOAT, GL_FALSE, sizeof(FoodData), 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_food]);
 
+    glBindVertexArray(arr[pass_creature]);
+    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_creature]);
+    register_attribute(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), 0);
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
+    register_attribute(1, 2, GL_FLOAT, GL_FALSE, sizeof(CreatureData), 0);
+    register_attribute(2, 3, GL_FLOAT, GL_FALSE, sizeof(CreatureData), 2 * sizeof(GLfloat));
+    register_attribute(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CreatureData), 5 * sizeof(GLfloat));
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_creature]);
 
-    constexpr int n = 3, m = 6 * n - 3;
-    count[0] = m;  count[1] = 0;
+    glBindVertexArray(0);
 
-    Vertex data[2 * n];
-    for(int i = 0; i < 2 * n; i++)
-    {
-        double r = i & 1 ? 1.0 : 0.25;
-        data[i].x = r * std::sin(i * (pi / n));
-        data[i].y = r * std::cos(i * (pi / n));
-    }
-
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[0]);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_STATIC_DRAW);
-
-    GLshort index[m], *ptr = index, end = 2 * n - 2;
-    for(int i = 0; i < end; i += 2)
-    {
-        *ptr++ = i;    *ptr++ = i + 1;  *ptr++ = i + 2;
-        *ptr++ = end;  *ptr++ = i;      *ptr++ = i + 2;
-    }
-    *ptr++ = end;  *ptr++ = end + 1;  *ptr++ = 0;
-    assert(ptr == index + m);
-
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vbo[2]);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(index), index, GL_STATIC_DRAW);
+    make_food_shape();
+    make_creature_shape();
 }
 
 Representation::~Representation()
 {
-    glDeleteProgram(prog);  glDeleteVertexArrays(1, &vao);  glDeleteBuffers(3, vbo);
+    for(int pass = 0; pass < pass_count; pass++)glDeleteProgram(prog[pass]);
+    glDeleteVertexArrays(pass_count, arr);  glDeleteBuffers(buf_count, buf);
 }
+
 
 void Representation::update(const World &world)
 {
-    std::vector<FoodData> buf;
-    buf.reserve(count[1] = world.total_food_count);
-    for(const auto &tile : world.tiles)for(const auto &food : tile.foods)
-        if(food.type > Food::Sprout)buf.emplace_back(world.config, food);
-    assert(buf.size() == count[1]);
+    std::vector<FoodData> food_data;
+    std::vector<CreatureData> creature_data;
+    food_data.reserve(obj_count[pass_food] = world.total_food_count);
+    creature_data.reserve(obj_count[pass_creature] = world.total_creature_count);
+    for(const auto &tile : world.tiles)
+    {
+        for(const auto &food : tile.foods)
+            if(food.type > Food::Sprout)food_data.emplace_back(world.config, food);
 
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[1]);
-    glBufferData(GL_ARRAY_BUFFER, count[1] * sizeof(FoodData), buf.data(), GL_STREAM_DRAW);
+        for(const Creature *cr = tile.first; cr; cr = cr->next)
+            creature_data.emplace_back(world.config, *cr);
+    }
+    assert(food_data.size() == obj_count[pass_food]);
+    assert(creature_data.size() == obj_count[pass_creature]);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);
+    glBufferData(GL_ARRAY_BUFFER, obj_count[pass_food] * sizeof(FoodData), food_data.data(), GL_STREAM_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
+    glBufferData(GL_ARRAY_BUFFER, obj_count[pass_creature] * sizeof(CreatureData), creature_data.data(), GL_STREAM_DRAW);
 }
 
 void Representation::draw(const World &world, const Camera &cam)
 {
-    glBindVertexArray(vao);  glUseProgram(prog);
-
     double mul_x = 2 / (cam.width  * cam.scale);
     double mul_y = 2 / (cam.height * cam.scale);
     uint64_t x = cam.x & world.config.full_mask_x;
@@ -168,9 +269,14 @@ void Representation::draw(const World &world, const Camera &cam)
     int ny = (y + cam.height * cam.scale) * std::exp2(-order_y);
     double dx = mul_x * std::exp2(order_x), x0 = x * mul_x + 1;
     double dy = mul_y * std::exp2(order_y), y0 = y * mul_y + 1;
-    for(int i = 0; i <= ny; i++)for(int j = 0; j <= nx; j++)
+
+    for(int pass = 0; pass < pass_count; pass++)
     {
-        glUniform4f(i_transform, j * dx - x0, y0 - i * dy, mul_x * tile_size, -mul_y * tile_size);
-        glDrawElementsInstanced(GL_TRIANGLES, count[0], GL_UNSIGNED_SHORT, nullptr, count[1]);
+        glBindVertexArray(arr[pass]);  glUseProgram(prog[pass]);
+        for(int i = 0; i <= ny; i++)for(int j = 0; j <= nx; j++)
+        {
+            glUniform4f(i_transform[pass], j * dx - x0, y0 - i * dy, mul_x * tile_size, -mul_y * tile_size);
+            glDrawElementsInstanced(GL_TRIANGLES, elem_count[pass], GL_UNSIGNED_BYTE, nullptr, obj_count[pass]);
+        }
     }
 }

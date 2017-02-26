@@ -12,7 +12,7 @@
 
 struct Camera
 {
-    static constexpr double scale_step = 1.0 / 16;
+    static constexpr double scale_step = 1.0 / 4;
     static constexpr int min_scale = -32 * 4;
     static constexpr int max_scale = +32 * 4;
 
@@ -38,15 +38,37 @@ constexpr double draw_scale = 1.0 / tile_size;
 
 class Representation
 {
-    GLuint vao, vbo[3];
-    size_t count[2];
+    enum Pass
+    {
+        pass_food, pass_creature, pass_count
+    };
 
-    GLuint prog;
-    GLint i_transform;
+    enum BufferType
+    {
+        vtx_food, inst_food, idx_food,
+        vtx_creature, inst_creature, idx_creature,
+        buf_count
+    };
+
+
+    GLuint prog[pass_count];
+    GLint i_transform[pass_count];
+    GLuint arr[pass_count], buf[buf_count];
+    size_t elem_count[pass_count];
+    size_t obj_count[pass_count];
+
+
+    void create_program(Pass pass, const char *name,
+        const unsigned char *vert_src, unsigned vert_len,
+        const unsigned char *frag_src, unsigned frag_len);
+
+    void make_food_shape();
+    void make_creature_shape();
 
 public:
     Representation();
     ~Representation();
+
     void update(const World &world);
     void draw(const World &world, const Camera &cam);
 };

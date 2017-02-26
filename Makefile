@@ -2,7 +2,7 @@
 CXX = g++
 HEADER = math.h world.h graph.h shaders.h
 SOURCE = math.cpp world.cpp graph.cpp main.cpp
-SHADER = food.vert food.frag
+SHADER = food.vert food.frag creature.vert creature.frag
 FLAGS = -std=c++11 -Wall -Wno-parentheses -DBUILTIN
 D_FLAGS = -g -O0 -DDEBUG
 R_FLAGS = -g -Ofast -flto -mtune=native -DNDEBUG

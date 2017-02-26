@@ -68,6 +68,10 @@ void Food::check_grass(const Config &config, const Food *food, size_t n)
 
 // Genome struct
 
+Genome::Genome()
+{
+}
+
 Genome::Genome(const Genome &parent, const Genome *father)
 {
 }
@@ -75,6 +79,27 @@ Genome::Genome(const Genome &parent, const Genome *father)
 
 
 // Creature struct
+
+Creature::Creature(uint64_t id, const Position &pos, angle_t angle, uint32_t energy) :
+    id(id), pos(pos), angle(angle), passive_energy(0), energy(energy), max_energy(energy), passive_cost(256), damage(0)  // TODO
+{
+    legs.push_back(Leg{tile_size / 64, 0});
+    rotators.push_back(1);
+    signals.push_back(f_eating);
+
+    stomachs.emplace_back(256 << 8);
+    hides.emplace_back(256 << 8, 32);
+
+    neirons.push_back(Neiron{1, -1, 0});  // leg
+    neirons.push_back(Neiron{1, -1, 0});  // rotator
+    neirons.push_back(Neiron{1, -1, 0});  // mouth
+
+    input.resize(neirons.size() + stomachs.size() + hides.size() + eyes.size() + radars.size(), 0);
+
+    uint32_t life = 0;
+    for(const auto &hide: hides)life += hide.max_life;
+    total_life = max_life = life;
+}
 
 Creature::Creature(uint64_t id, const Position &pos, angle_t angle, uint32_t energy, const Creature &parent) :
     id(id), gen(parent.gen, parent.father.target ? &parent.father.target->gen : nullptr), pos(pos), angle(angle)
@@ -185,11 +210,13 @@ uint32_t Creature::execute_step(const Config &config)
         }
         else input[i] = 0;
 
+    total_life = 0;
     for(size_t i = hides.size() - 1; i != size_t(-1); i--)
     {
-        hides[i].life = std::min(hides[i].capacity, hides[i].life + hides[i].regen);
+        hides[i].life = std::min(hides[i].max_life, hides[i].life + hides[i].regen);
         uint32_t hit = std::min(hides[i].life, damage);
         hides[i].life -= hit;  damage -= hit;
+        total_life += hides[i].life;
     }
 
     energy = std::min(energy, max_energy);
@@ -228,16 +255,8 @@ World::Tile::Tile(const Config &config, const Tile &old, size_t &total_food, siz
     total_food += spawn_start = foods.size();
 }
 
-World::Tile::~Tile()
-{
-    for(Creature *ptr = first; ptr;)
-    {
-        Creature *cr = ptr;  ptr = ptr->next;  delete cr;
-    }
-}
 
-
-World::World() : total_food_count(0), spawn_per_tile(4), next_id(0)
+World::World() : total_food_count(0), total_creature_count(0), spawn_per_tile(4), next_id(0)
 {
     config.order_x = config.order_y = 5;  // 32 x 32
     config.base_radius = tile_size / 64;
@@ -252,16 +271,48 @@ World::World() : total_food_count(0), spawn_per_tile(4), next_id(0)
 
     uint64_t seed = 1234;
     uint32_t exp_grass_gen = uint32_t(-1) >> 16;
+    uint32_t exp_creature_gen = uint32_t(-1) >> 16;
+    uint32_t creature_energy = 64 << 10;
 
     size_t size = size_t(1) << (config.order_x + config.order_y);
-    std::swap(config.exp_sprout_per_tile, exp_grass_gen);  tiles.reserve(size);
+    tiles.reserve(size);
+
     for(size_t i = 0; i < size; i++)
     {
         tiles.emplace_back(seed, i);
-        spawn_grass(tiles[i], i & config.mask_x, i >> config.order_x);
+        uint32_t x = i & config.mask_x, y = i >> config.order_x;
+        uint64_t offs_x = uint64_t(x) << tile_order;
+        uint64_t offs_y = uint64_t(y) << tile_order;
+
+        uint32_t n = tiles[i].rand.poisson(exp_grass_gen);
+        for(uint32_t k = 0; k < n; k++)
+        {
+            uint64_t xx = (tiles[i].rand.uint32() & tile_mask) | offs_x;
+            uint64_t yy = (tiles[i].rand.uint32() & tile_mask) | offs_y;
+            tiles[i].foods.emplace_back(config, Food::Sprout, Position{xx, yy});
+        }
+
+        n = tiles[i].rand.poisson(exp_creature_gen);
+        for(uint32_t k = 0; k < n; k++)
+        {
+            angle_t angle = tiles[i].rand.uint32();
+            uint64_t xx = (tiles[i].rand.uint32() & tile_mask) | offs_x;
+            uint64_t yy = (tiles[i].rand.uint32() & tile_mask) | offs_y;
+            Creature *cr = new Creature(next_id++, Position{xx, yy}, angle, creature_energy);
+            *tiles[i].last = cr;  tiles[i].last = &cr->next;
+        }
+        total_creature_count += n;  *tiles[i].last = nullptr;
     }
-    std::swap(config.exp_sprout_per_tile, exp_grass_gen);
 }
+
+World::~World()
+{
+    for(auto &tile : tiles)for(Creature *ptr = tile.first; ptr;)
+    {
+        Creature *cr = ptr;  ptr = ptr->next;  delete cr;
+    }
+}
+
 
 size_t World::tile_index(Position &pos) const
 {
@@ -315,9 +366,18 @@ void World::spawn_meat(Tile &tile, Position pos, uint32_t energy)
 
 void World::process_tile_pair(Tile &tile1, Tile &tile2)
 {
-    for(Creature *cr1 = tile1.first; cr1; cr1 = cr1->next)
-        for(Creature *cr2 = tile2.first; cr2; cr2 = cr2->next)
-            if(cr1 != cr2)Creature::process_detectors(cr1, cr2);
+    if(&tile1 == &tile2)
+    {
+        for(Creature *cr1 = tile1.first; cr1; cr1 = cr1->next)
+            for(Creature *cr2 = cr1->next; cr2; cr2 = cr2->next)
+                Creature::process_detectors(cr1, cr2);
+    }
+    else
+    {
+        for(Creature *cr1 = tile1.first; cr1; cr1 = cr1->next)
+            for(Creature *cr2 = tile2.first; cr2; cr2 = cr2->next)
+                Creature::process_detectors(cr1, cr2);
+    }
 
     for(Creature *cr = tile1.first; cr; cr = cr->next)
         cr->process_food(tile2.foods);
@@ -340,6 +400,7 @@ void World::next_step()
     for(size_t i = 0; i < old.size(); i++)
         tiles.emplace_back(config, old[i], total_food_count, spawn_per_tile);
 
+    total_creature_count = 0;
     for(size_t i = 0; i < old.size(); i++)
     {
         spawn_grass(tiles[i], i & config.mask_x, i >> config.order_x);
@@ -357,13 +418,13 @@ void World::next_step()
             }
 
             size_t index = tile_index(cr->pos);
-            *tiles[index].last = cr;  tiles[index].last = &cr->next;
+            *tiles[index].last = cr;  tiles[index].last = &cr->next;  total_creature_count++;
             for(const auto &womb : cr->wombs)if(womb.active)
             {
                 Creature *child = Creature::spawn(next_id++, prev_pos, prev_angle, womb.energy, *cr);
                 if(child)
                 {
-                    *tiles[i].last = child;  tiles[i].last = &child->next;
+                    *tiles[i].last = child;  tiles[i].last = &child->next;  total_creature_count++;
                 }
                 else spawn_meat(tiles[i], prev_pos, womb.energy);
             }
