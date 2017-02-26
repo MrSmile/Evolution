@@ -77,10 +77,12 @@ struct FoodData
 {
     GLfloat x, y, rad, type;
 
-    FoodData(const Config &config, const Food &food) :
-        x(food.pos.x * draw_scale), y(food.pos.y * draw_scale),
-        rad(config.base_radius * draw_scale), type(food.type - Food::Grass)
+    void set(const Config &config, const Food &food)
     {
+        x = food.pos.x * draw_scale;
+        y = food.pos.y * draw_scale;
+        rad = config.base_radius * draw_scale;
+        type = food.type - Food::Grass;
     }
 };
 
@@ -89,17 +91,19 @@ struct CreatureData
     GLfloat x, y, rad[3];
     GLubyte angle, signal, energy, life;
 
-    CreatureData(const Config &config, const Creature &cr) :
-        x(cr.pos.x * draw_scale), y(cr.pos.y * draw_scale),
-        angle(cr.angle), signal(cr.flags)
+    void set(const Config &config, const Creature &cr)
     {
         constexpr GLfloat energy_mul = 1.0 / (1 << 16);
         constexpr GLfloat life_mul   = 1.0 / (1 << 16);
+
+        x = cr.pos.x * draw_scale;
+        y = cr.pos.y * draw_scale;
 
         GLfloat sqr = 1;  rad[0] = config.base_radius * draw_scale;
         sqr += cr.max_energy * energy_mul;  rad[1] = rad[0] * sqrt(sqr);
         sqr += cr.max_life * life_mul;      rad[2] = rad[0] * sqrt(sqr);
 
+        angle = cr.angle;  signal = cr.flags;
         energy = std::lround(255.0 * cr.energy / cr.max_energy);
         life = std::lround(255.0 * cr.total_life / cr.max_life);
     }
@@ -235,26 +239,41 @@ Representation::~Representation()
 
 void Representation::update(const World &world)
 {
-    std::vector<FoodData> food_data;
-    std::vector<CreatureData> creature_data;
-    food_data.reserve(obj_count[pass_food] = world.total_food_count);
-    creature_data.reserve(obj_count[pass_creature] = world.total_creature_count);
+    obj_count[pass_food] = world.total_food_count;
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_ptr = nullptr;
+    glBufferData(GL_ARRAY_BUFFER, obj_count[pass_food] * sizeof(FoodData), nullptr, GL_STREAM_DRAW);
+    if(obj_count[pass_food])food_ptr = static_cast<FoodData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+
+    obj_count[pass_creature] = world.total_creature_count;
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);  CreatureData *creature_ptr = nullptr;
+    glBufferData(GL_ARRAY_BUFFER, obj_count[pass_creature] * sizeof(CreatureData), nullptr, GL_STREAM_DRAW);
+    if(obj_count[pass_creature])creature_ptr = static_cast<CreatureData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+
+#ifndef NDEBUG
+    FoodData *food_end = food_ptr + obj_count[pass_food];
+    CreatureData *creature_end = creature_ptr + obj_count[pass_creature];
+#endif
     for(const auto &tile : world.tiles)
     {
-        for(const auto &food : tile.foods)
-            if(food.type > Food::Sprout)food_data.emplace_back(world.config, food);
+        for(const auto &food : tile.foods)if(food.type > Food::Sprout)
+            (food_ptr++)->set(world.config, food);
 
         for(const Creature *cr = tile.first; cr; cr = cr->next)
-            creature_data.emplace_back(world.config, *cr);
+            (creature_ptr++)->set(world.config, *cr);
     }
-    assert(food_data.size() == obj_count[pass_food]);
-    assert(creature_data.size() == obj_count[pass_creature]);
+    assert(food_ptr == food_end);
+    assert(creature_ptr == creature_end);
 
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);
-    glBufferData(GL_ARRAY_BUFFER, obj_count[pass_food] * sizeof(FoodData), food_data.data(), GL_STREAM_DRAW);
-
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
-    glBufferData(GL_ARRAY_BUFFER, obj_count[pass_creature] * sizeof(CreatureData), creature_data.data(), GL_STREAM_DRAW);
+    if(food_ptr)
+    {
+        glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+    }
+    if(creature_ptr)
+    {
+        glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+    }
 }
 
 void Representation::draw(const World &world, const Camera &cam)
