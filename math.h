@@ -19,8 +19,10 @@ constexpr uint32_t tile_size = 1ul << tile_order;
 constexpr uint64_t max_r2 = 1ull << (2 * tile_order);
 constexpr uint64_t sqrt_scale = (max_r2 - 1) / (255u * 255u) + 1;
 constexpr uint32_t tile_mask = tile_size - 1;
+constexpr int radius_bits = 8;
 
 typedef uint8_t angle_t;
+constexpr int angle_bits = 8;
 constexpr angle_t flip_angle = 128;
 constexpr angle_t angle_90 = 64;
 

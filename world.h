@@ -10,19 +10,53 @@ using std::size_t;
 
 
 
+namespace Slot
+{
+    enum Type : uint8_t
+    {
+        Link    =  0,  // link
+        Mouth   =  1,  // out
+        Stomach =  2,  // in
+        Womb    =  3,  // out
+        Eye     =  4,  // in
+        Radar   =  5,  // in
+        Claw    =  6,  // out
+        Hide    =  7,  // in
+        Leg     =  8,  // out
+        Rotator =  9,  // out
+        Signal  = 10,  // out
+        Invalid = 11
+    };
+}
+
+constexpr uint8_t slot_type_bits = 4;
+constexpr uint8_t flag_bits = 4;
+
 typedef uint8_t slot_t;
 
-struct Position
-{
-    uint64_t x, y;
-};
 
 struct Config
 {
+    struct SlotCost
+    {
+        uint32_t initial, per_tick;
+    };
+
     uint8_t order_x, order_y;
     uint32_t base_radius;
+
+    uint8_t chromosome_bits;
+    uint8_t slot_bits, base_bits;
+    uint32_t gene_init_cost, gene_pass_rate;
+
+    SlotCost cost[Slot::Invalid];
+    uint32_t spawn_mul, capacity_mul, hide_mul;
+    uint32_t damage_mul, life_mul, life_regen;
+    uint32_t eating_cost, signal_cost;
+    uint32_t speed_mul, rotate_mul;
+    uint8_t mass_order;
+
     uint32_t food_energy;
-    uint8_t input_level;
     uint32_t exp_sprout_per_tile;
     uint32_t exp_sprout_per_grass;
     uint32_t repression_range;
@@ -50,6 +84,11 @@ struct Detector
 };
 
 
+struct Position
+{
+    uint64_t x, y;
+};
+
 struct Food
 {
     enum Type
@@ -68,28 +107,113 @@ struct Food
 };
 
 
-enum class Slot : uint8_t
-{
-    Link    =  0,  // link
-    Mouth   =  1,  // out
-    Stomach =  2,  // in
-    Womb    =  3,  // out
-    Eye     =  4,  // in
-    Radar   =  5,  // in
-    Claw    =  6,  // out
-    Hide    =  7,  // in
-    Leg     =  8,  // out
-    Rotator =  9,  // out
-    Signal  = 10,  // out
-};
-
 struct Genome
 {
-    // TODO
+    struct Gene
+    {
+        uint64_t data;
 
-    Genome();
-    Genome(const Genome &parent, const Genome *father);
+        Gene(const Config &config, uint32_t slot, Slot::Type type,
+            uint32_t base, angle_t angle1, angle_t angle2, uint32_t radius, uint8_t flags);
+        Gene(const Config &config, uint32_t slot, int32_t weight, uint32_t source, uint8_t offset);
+
+        uint32_t take_bits(int n)
+        {
+            uint32_t res = data >> (64 - n);  data <<= n;  return res;
+        }
+
+        int32_t take_bits_signed(int n)
+        {
+            int32_t res = int64_t(data) >> (64 - n);  data <<= n;  return res;
+        }
+
+        bool operator < (const Gene &cmp) const
+        {
+            return data < cmp.data;
+        }
+    };
+
+    std::vector<uint32_t> chromosomes;
+    std::vector<Gene> genes;
+
+    explicit Genome(const Config &config);
+    Genome(const Config &config, Random &rand, const Genome &parent, const Genome *father);
 };
+
+
+struct GenomeProcessor
+{
+    struct LinkData
+    {
+        int32_t weight;
+        uint32_t source;
+
+        LinkData(int32_t weight, uint32_t source) : weight(weight), source(source)
+        {
+        }
+    };
+
+    enum NeiroState : uint8_t
+    {
+        s_normal, s_input, s_always_off, s_always_on
+    };
+
+    struct SlotData
+    {
+        uint32_t link_start, link_count;
+        int32_t act_level, min_level, max_level;
+        NeiroState neiro_state;  bool used;
+
+        Slot::Type type;
+        uint32_t base, radius;
+        angle_t angle1, angle2;
+        uint8_t flags;
+
+        SlotData(uint32_t link_start, uint32_t link_count, int32_t act_level, int32_t min_level, int32_t max_level) :
+            link_start(link_start), link_count(link_count), act_level(act_level), min_level(min_level), max_level(max_level),
+            neiro_state(s_normal), used(false), type(Slot::Invalid)
+        {
+        }
+    };
+
+    enum UseFlags
+    {
+        f_base   = 1 << 0,
+        f_radius = 1 << 1,
+        f_angle1 = 1 << 2,
+        f_angle2 = 1 << 3,
+        f_vision = 1 << 4,
+        f_signal = 1 << 5,
+        f_useful = 1 << 6,
+        f_output = 1 << 7
+    };
+
+
+    uint32_t slot_count;
+    uint32_t link_start, link_count, core_count;
+    int32_t act_level, min_level, max_level;
+    uint32_t type_and, type_or;
+
+    uint32_t base, radius;
+    int32_t angle1_x, angle1_y;
+    int32_t angle2_x, angle2_y;
+    uint8_t flags;
+
+    std::vector<LinkData> links;
+    std::vector<SlotData> slots;
+    uint32_t working_links;
+
+
+    void reset();
+    bool update(SlotData &slot, int use);
+    bool update(SlotData &slot);
+    void append_slot();
+
+    GenomeProcessor(const Config &config, uint32_t max_links);
+    void process(const Config &config, Genome::Gene gene);
+    void finalize();
+};
+
 
 struct Creature
 {
@@ -105,20 +229,34 @@ struct Creature
     {
         uint32_t energy;
         bool active;
+
+        Womb(const Config &config, const GenomeProcessor::SlotData &slot);
     };
 
     struct Claw
     {
-        uint32_t radius;
+        uint64_t rad_sqr;
         angle_t angle, delta;
-        uint32_t damage;
+        uint32_t damage, act_cost;
         bool active;
+
+        Claw(const Config &config, const GenomeProcessor::SlotData &slot);
     };
 
     struct Leg
     {
         uint32_t dist_x4;
         angle_t angle;
+
+        Leg(const Config &config, const GenomeProcessor::SlotData &slot);
+    };
+
+    struct Signal
+    {
+        uint8_t flags;
+        uint32_t act_cost;
+
+        Signal(const Config &config, const GenomeProcessor::SlotData &slot);
     };
 
 
@@ -126,28 +264,24 @@ struct Creature
     {
         uint32_t capacity, mul;
 
-        Stomach(uint32_t capacity) : capacity(capacity)
-        {
-            mul = ((255ul << 24) - 1) / capacity + 1;
-        }
+        Stomach(const Config &config, const GenomeProcessor::SlotData &slot);
     };
 
     struct Hide
     {
         uint32_t life, max_life, regen, mul;
 
-        Hide(uint32_t max_life, uint32_t regen) : life(max_life), max_life(max_life), regen(regen)
-        {
-            mul = ((255ul << 24) - 1) / max_life + 1;
-        }
+        Hide(const Config &config, const GenomeProcessor::SlotData &slot);
     };
 
     struct Eye
     {
-        uint32_t radius;
+        uint64_t rad_sqr;
         angle_t angle, delta;
         uint8_t flags;
         uint32_t count;
+
+        Eye(const Config &config, const GenomeProcessor::SlotData &slot);
     };
 
     struct Radar
@@ -155,12 +289,13 @@ struct Creature
         angle_t angle, delta;
         uint8_t flags;
         uint64_t min_r2;
+
+        Radar(const Config &config, const GenomeProcessor::SlotData &slot);
     };
 
 
     struct Neiron
     {
-        uint32_t act_cost;
         int32_t act_level;
         int32_t level;
     };
@@ -169,11 +304,15 @@ struct Creature
     {
         slot_t input, output;
         int8_t weight;
+
+        Link(slot_t input, slot_t output, int8_t weight) : input(input), output(output), weight(weight)
+        {
+        }
     };
 
 
     uint64_t id;
-    Genome gen;
+    Genome genome;
 
     Position pos;
     angle_t angle;
@@ -187,7 +326,7 @@ struct Creature
     std::vector<Claw> claws;
     std::vector<Leg> legs;
     std::vector<angle_t> rotators;
-    std::vector<uint8_t> signals;
+    std::vector<Signal> signals;
 
     std::vector<Stomach> stomachs;
     std::vector<Hide> hides;
@@ -205,9 +344,11 @@ struct Creature
     Creature(const Creature &) = delete;
     Creature &operator = (const Creature &) = delete;
 
-    Creature(uint64_t id, const Position &pos, angle_t angle, uint32_t energy);
-    Creature(uint64_t id, const Position &pos, angle_t angle, uint32_t energy, const Creature &parent);
-    static Creature *spawn(uint64_t id, const Position &pos, angle_t angle, uint32_t energy, const Creature &parent);
+    Slot::Type append_slot(const Config &config, const GenomeProcessor::SlotData &slot);
+    Creature(const Config &config, Random &rand, uint64_t id,
+        const Position &pos, angle_t angle, uint32_t spawn_energy, const Genome &parent, const Genome *father);
+    static Creature *spawn(const Config &config, Random &rand, uint64_t id,
+        const Position &pos, angle_t angle, uint32_t spawn_energy, const Creature &parent);
 
     void pre_process(const Config &config);
     void update_view(uint8_t flags, uint64_t r2, angle_t test);
