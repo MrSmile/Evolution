@@ -93,15 +93,16 @@ struct CreatureData
 
     void set(const Config &config, const Creature &cr)
     {
-        constexpr GLfloat energy_mul = 1.0 / (1 << 16);
-        constexpr GLfloat life_mul   = 1.0 / (1 << 16);
+        GLfloat energy_mul = config.base_r2 * draw_scale * draw_scale / (1 << 16);
+        GLfloat life_mul = energy_mul * config.hide_mul / config.life_mul;
 
         x = cr.pos.x * draw_scale;
         y = cr.pos.y * draw_scale;
 
-        GLfloat sqr = 1;  rad[0] = config.base_radius * draw_scale;
-        sqr += cr.max_energy * energy_mul;  rad[1] = rad[0] * sqrt(sqr);
-        sqr += cr.max_life * life_mul;      rad[2] = rad[0] * sqrt(sqr);
+        GLfloat sqr = cr.passive_energy * energy_mul - cr.max_life * life_mul;
+        rad[0] = sqrt(sqr);  sqr += cr.max_energy * energy_mul;
+        rad[1] = sqrt(sqr);  sqr += cr.max_life * life_mul;
+        rad[2] = sqrt(sqr);
 
         angle = cr.angle;  signal = cr.flags;
         energy = std::lround(255.0 * cr.energy / cr.max_energy);

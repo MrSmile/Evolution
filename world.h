@@ -79,6 +79,7 @@ struct Detector
     uint64_t min_r2, id;
     Creature *target;
 
+    explicit Detector(uint64_t r2);
     void reset(uint64_t r2);
     void update(uint64_t r2, Creature *cr);
 };
@@ -219,9 +220,16 @@ struct Creature
 {
     enum Flags : uint8_t
     {
-        f_eating = 1 << 0,
-        f_grass  = 1 << 2,  // 1 << Food::Grass
-        f_meat   = 1 << 3,  // 1 << Food::Meat
+        f_eating   = 1 << 0,
+        f_creature = 1 << 1,
+        f_grass    = 1 << 2,  // 1 << Food::Grass
+        f_meat     = 1 << 3,  // 1 << Food::Meat
+        f_signal1  = 1 << 4,
+        f_signal2  = 1 << 5,
+        f_signal3  = 1 << 6,
+
+        f_signals = f_signal1 | f_signal2 | f_signal3,
+        f_visible = f_creature | f_grass | f_meat | f_signals
     };
 
 
