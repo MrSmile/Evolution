@@ -40,5 +40,7 @@ public:
     Random(uint64_t seed, uint64_t seq);
 
     uint32_t uint32();
+    uint32_t uniform(uint32_t lim);
     uint32_t poisson(uint32_t exp_prob);
+    uint32_t geometric(uint32_t prob);
 };

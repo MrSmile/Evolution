@@ -125,11 +125,140 @@ Genome::Genome(const Config &config)
     chromosomes[0] = genes.size();
 }
 
-Genome::Genome(const Config &config, Random &rand, const Genome &parent, const Genome *father) :
-    chromosomes(parent.chromosomes), genes(parent.genes)  // TODO: mutate
+
+struct GeneSequence
 {
-    assert(parent.chromosomes.size() == (size_t(1) << config.chromosome_bits));
-    assert(!father || father->chromosomes.size() == (size_t(1) << config.chromosome_bits));
+    const Genome::Gene *start;
+    size_t count;  uint32_t next;
+
+    GeneSequence(const Genome::Gene *start, size_t count) : start(start), count(count), next(-1)
+    {
+    }
+};
+
+Genome::Genome(const Config &config, Random &rand, const Genome &parent, const Genome *father)
+{
+    uint32_t chromosome_count = size_t(1) << config.chromosome_bits;
+    assert(parent.chromosomes.size() == chromosome_count);
+
+    // stage 1: clone or take one of every pair from parents
+
+    uint32_t n = 10;  // TODO: config?
+    std::vector<GeneSequence> seqs;
+    seqs.reserve(chromosome_count + n);
+    if(father)
+    {
+        assert(father->chromosomes.size() == chromosome_count);
+        std::vector<uint8_t> pairs(std::max<uint32_t>(1, chromosome_count >> 5));
+        for(auto &pair : pairs)pair = rand.uint32();
+
+        const Gene *pos_m = parent.genes.data();
+        const Gene *pos_f = father->genes.data();
+        for(uint32_t i = 0; i < chromosome_count; i += 2)
+        {
+            if(pairs[i >> 5] & (1 << (i & 31)))
+                seqs.emplace_back(pos_m + parent.chromosomes[i], parent.chromosomes[i + 1]);
+            else seqs.emplace_back(pos_m, parent.chromosomes[i]);
+            pos_m += parent.chromosomes[i] + parent.chromosomes[i + 1];
+
+            if(pairs[i >> 5] & (2 << (i & 31)))
+                seqs.emplace_back(pos_f + father->chromosomes[i], father->chromosomes[i + 1]);
+            else seqs.emplace_back(pos_f, father->chromosomes[i]);
+            pos_f += father->chromosomes[i] + father->chromosomes[i + 1];
+        }
+        assert(pos_m == parent.genes.data() + parent.genes.size());
+        assert(pos_f == father->genes.data() + father->genes.size());
+    }
+    else
+    {
+        const Gene *pos = parent.genes.data();
+        for(uint32_t i = 0; i < chromosome_count; i++)
+        {
+            seqs.emplace_back(pos, parent.chromosomes[i]);  pos += parent.chromosomes[i];
+        }
+        assert(pos == parent.genes.data() + parent.genes.size());
+    }
+
+    // stage 2: split chromosomes
+
+    uint32_t len = rand.geometric(config.genome_split_factor);
+    for(uint32_t i = 0; i < chromosome_count; i++)
+    {
+        uint32_t pos = i;
+        while(seqs[pos].count > len)
+        {
+            uint32_t last = seqs.size();
+            seqs.emplace_back(seqs[pos].start + len, seqs[pos].count - len);
+            seqs[pos].count = len;
+
+            pos = chromosome_count + rand.uniform(last - chromosome_count + 1);
+            len = rand.geometric(config.genome_split_factor);
+            std::swap(seqs[pos], seqs[last]);
+        }
+        len -= seqs[pos].count;
+    }
+
+    std::vector<uint32_t> last(chromosome_count);
+    for(uint32_t i = 0; i < chromosome_count; i++)last[i] = i;
+    for(uint32_t i = chromosome_count; i < seqs.size(); i++)
+    {
+        uint32_t prev = rand.uint32() & (chromosome_count - 1);
+        seqs[last[prev]].next = i;  last[prev] = i;
+    }
+
+    // stage 3: delete or duplicate whole chromosomes
+
+    uint32_t pos = rand.geometric(config.chromosome_replace_factor);
+    while(pos < chromosome_count)
+    {
+        uint32_t index = rand.uint32();
+        if(index > config.chromosome_copy_prob)
+        {
+            seqs[pos].count = 0;  seqs[pos].next = -1;
+        }
+        else seqs[pos] = seqs[index & (chromosome_count - 1)];
+
+        pos += rand.geometric(config.chromosome_replace_factor) + 1;
+    }
+
+    // consolidate genome
+
+    uint32_t total_size = 0;
+    chromosomes.resize(chromosome_count);
+    for(uint32_t i = 0; i < chromosome_count; i++)
+    {
+        uint32_t size = 0;  uint32_t pos = i;
+        do
+        {
+            size += seqs[pos].count;  pos = seqs[pos].next;
+        }
+        while(pos != uint32_t(-1));
+
+        total_size += chromosomes[i] = size;
+    }
+    genes.reserve(total_size);
+    for(uint32_t i = 0; i < chromosome_count; i++)
+    {
+        uint32_t pos = i;
+        do
+        {
+            const Gene *gene = seqs[pos].start;
+            const Gene *end = gene + seqs[pos].count;
+            while(gene < end)genes.push_back(*gene++);
+            pos = seqs[pos].next;
+        }
+        while(pos != uint32_t(-1));
+    }
+    assert(genes.size() == total_size);
+
+    // stage 4: mutate individual bits
+
+    pos = rand.geometric(config.bit_mutate_factor);
+    while(pos < 64 * total_size)
+    {
+        genes[pos >> 6].data ^= 1 << (pos & 63);
+        pos += rand.geometric(config.bit_mutate_factor) + 1;
+    }
 }
 
 
@@ -722,6 +851,11 @@ World::World() : current_time(0), total_food_count(0), total_creature_count(0), 
     config.base_radius = tile_size / 64;
 
     config.chromosome_bits = 6;  // 64 = 32 pair
+    config.genome_split_factor = ~(uint32_t(-1) / 64);
+    config.chromosome_replace_factor = ~(uint32_t(-1) / 64);
+    config.chromosome_copy_prob = uint32_t(-1) / 2;
+    config.bit_mutate_factor = ~(uint32_t(-1) / 1024);
+
     config.slot_bits = 8;  // 256 slots
     config.base_bits = 8;
     config.gene_init_cost = 64;
@@ -751,7 +885,7 @@ World::World() : current_time(0), total_food_count(0), total_creature_count(0), 
     config.signal_cost = 8;
     config.speed_mul = tile_size >> 14;
     config.rotate_mul = 8 * config.speed_mul;
-    config.mass_order = 2 * tile_order - 39;
+    config.mass_order = 2 * tile_order - 38;
 
     config.food_energy = 4096;
     config.exp_sprout_per_tile  = ~(uint32_t(-1) / 64);

@@ -46,6 +46,10 @@ struct Config
     uint32_t base_radius;
 
     uint8_t chromosome_bits;
+    uint32_t genome_split_factor;
+    uint32_t chromosome_replace_factor;
+    uint32_t chromosome_copy_prob;
+    uint32_t bit_mutate_factor;
     uint8_t slot_bits, base_bits;
     uint32_t gene_init_cost, gene_pass_rate;
 

@@ -306,12 +306,43 @@ uint32_t Random::uint32()  // algorithm: M.E. O'Neill / pcg-random.org
     return (res >> rot) | (res << ((-rot) & 31));
 }
 
+uint32_t Random::uniform(uint32_t lim)
+{
+    for(;;)
+    {
+        uint32_t res = uint32(), val = res / lim * lim;
+        if(val <= uint32_t(-lim))return res - val;
+    }
+}
+
 uint32_t Random::poisson(uint32_t exp_prob)
 {
     uint32_t val = uint32(), res = 0;
     while(val > exp_prob)
     {
-        val = uint64_t(val) * uint32() >> 32;  res++;
+        val = mul_high(val, uint32());  res++;
+    }
+    return res;
+}
+
+uint32_t Random::geometric(uint32_t prob)
+{
+    uint32_t val = uint32();
+    if(val >= prob)return 0;
+
+    uint32_t pow[37];  int ord = 0;
+    for(;;)
+    {
+        pow[ord] = prob;
+        uint32_t next = mul_high(prob, prob);
+        if(val >= next)break;  prob = next;  ord++;
+    }
+
+    uint32_t res = 1;
+    while(ord)
+    {
+        uint32_t next = mul_high(prob, pow[--ord]);  res *= 2;
+        if(val >= next)continue;  prob = next;  res++;
     }
     return res;
 }
