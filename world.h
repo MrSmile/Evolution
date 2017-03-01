@@ -397,5 +397,6 @@ struct World
     void spawn_grass(Tile &tile, uint32_t x, uint32_t y);
     void spawn_meat(Tile &tile, Position pos, uint32_t energy);
     void process_tile_pair(Tile &tile1, Tile &tile2);
+    void process_detectors();
     void next_step();
 };

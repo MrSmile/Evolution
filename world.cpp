@@ -780,8 +780,9 @@ World::World() : current_time(0), total_food_count(0), total_creature_count(0), 
         {
             uint64_t xx = (tiles[i].rand.uint32() & tile_mask) | offs_x;
             uint64_t yy = (tiles[i].rand.uint32() & tile_mask) | offs_y;
-            tiles[i].foods.emplace_back(config, Food::Sprout, Position{xx, yy});
+            tiles[i].foods.emplace_back(config, Food::Grass, Position{xx, yy});
         }
+        total_food_count += tiles[i].spawn_start = n;
 
         n = tiles[i].rand.poisson(exp_creature_gen);
         for(uint32_t k = 0; k < n; k++)
@@ -793,8 +794,9 @@ World::World() : current_time(0), total_food_count(0), total_creature_count(0), 
                 Position{xx, yy}, angle, uint32_t(-1), init_genome, nullptr);
             *tiles[i].last = cr;  tiles[i].last = &cr->next;
         }
-        total_creature_count += n;  *tiles[i].last = nullptr;
+        total_creature_count += n;
     }
+    process_detectors();
 }
 
 World::~World()
@@ -884,6 +886,36 @@ void World::process_tile_pair(Tile &tile1, Tile &tile2)
         tile2.foods[i].check_grass(config, tile1.foods.data(), tile1.spawn_start);
 }
 
+void World::process_detectors()
+{
+    size_t spawn = 0;
+    for(auto &tile : tiles)
+    {
+        *tile.last = nullptr;
+        spawn = std::max(spawn, tile.foods.size() - tile.spawn_start);
+        for(Creature *cr = tile.first; cr; cr = cr->next)
+            cr->pre_process(config);
+    }
+    spawn_per_tile = std::max(spawn_per_tile / 2, 2 * spawn + 1);
+
+    for(size_t i = 0; i < tiles.size(); i++)
+    {
+        uint32_t x = i & config.mask_x, y = i >> config.order_x;
+        uint32_t x1 = (x + 1) & config.mask_x, xm = (x - 1) & config.mask_x;
+        uint32_t y1 = (y + 1) & config.mask_y;
+
+        process_tile_pair(tiles[i], tiles[i]);
+        process_tile_pair(tiles[i], tiles[x1 | (y  << config.order_x)]);
+        process_tile_pair(tiles[i], tiles[xm | (y1 << config.order_x)]);
+        process_tile_pair(tiles[i], tiles[x  | (y1 << config.order_x)]);
+        process_tile_pair(tiles[i], tiles[x1 | (y1 << config.order_x)]);
+    }
+
+    for(auto &tile : tiles)
+        for(Creature *cr = tile.first; cr; cr = cr->next)
+            cr->post_process();
+}
+
 void World::next_step()
 {
     std::vector<Tile> old;  old.reserve(tiles.size());  old.swap(tiles);
@@ -925,32 +957,5 @@ void World::next_step()
     }
     old.clear();
 
-    size_t spawn = 0;
-    for(auto &tile : tiles)
-    {
-        *tile.last = nullptr;
-        spawn = std::max(spawn, tile.foods.size() - tile.spawn_start);
-        for(Creature *cr = tile.first; cr; cr = cr->next)
-            cr->pre_process(config);
-    }
-    spawn_per_tile = std::max(spawn_per_tile / 2, 2 * spawn + 1);
-
-    for(size_t i = 0; i < tiles.size(); i++)
-    {
-        uint32_t x = i & config.mask_x, y = i >> config.order_x;
-        uint32_t x1 = (x + 1) & config.mask_x, xm = (x - 1) & config.mask_x;
-        uint32_t y1 = (y + 1) & config.mask_y;
-
-        process_tile_pair(tiles[i], tiles[i]);
-        process_tile_pair(tiles[i], tiles[x1 | (y  << config.order_x)]);
-        process_tile_pair(tiles[i], tiles[xm | (y1 << config.order_x)]);
-        process_tile_pair(tiles[i], tiles[x  | (y1 << config.order_x)]);
-        process_tile_pair(tiles[i], tiles[x1 | (y1 << config.order_x)]);
-    }
-
-    for(auto &tile : tiles)
-        for(Creature *cr = tile.first; cr; cr = cr->next)
-            cr->post_process();
-
-    current_time++;
+    process_detectors();  current_time++;
 }
