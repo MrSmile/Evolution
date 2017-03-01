@@ -384,6 +384,7 @@ struct World
 
 
     Config config;
+    uint64_t current_time;
     std::vector<Tile> tiles;
     size_t total_food_count, total_creature_count;
     size_t spawn_per_tile;

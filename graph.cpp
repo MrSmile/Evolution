@@ -238,7 +238,7 @@ Representation::~Representation()
 }
 
 
-void Representation::update(const World &world)
+void Representation::update(SDL_Window *window, const World &world)
 {
     obj_count[pass_food] = world.total_food_count;
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_ptr = nullptr;
@@ -275,6 +275,12 @@ void Representation::update(const World &world)
         glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
         glUnmapBuffer(GL_ARRAY_BUFFER);
     }
+
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+        "Evolution - Time: %llu, Food: %lu, Creature: %lu", (unsigned long long)world.current_time,
+        (unsigned long)world.total_food_count, (unsigned long)world.total_creature_count);
+    SDL_SetWindowTitle(window, buf);
 }
 
 void Representation::draw(const World &world, const Camera &cam)

@@ -38,7 +38,7 @@ bool main_loop(SDL_Window *window)
     World world;
     Camera cam(window);
     Representation graph;
-    graph.update(world);
+    graph.update(window, world);
 
     if(!check_gl_error())return false;
 
@@ -49,7 +49,7 @@ bool main_loop(SDL_Window *window)
         {
             if(play)
             {
-                world.next_step();  graph.update(world);
+                world.next_step();  graph.update(window, world);
             }
             cam.apply();
             glClearColor(0.0, 0.0, 0.0, 1.0);  glClear(GL_COLOR_BUFFER_BIT);
@@ -76,7 +76,7 @@ bool main_loop(SDL_Window *window)
                 play = !play;  break;
 
             case SDLK_RIGHT:
-                world.next_step();  graph.update(world);
+                world.next_step();  graph.update(window, world);
                 play = false;  break;
 
             default:

@@ -69,6 +69,6 @@ public:
     Representation();
     ~Representation();
 
-    void update(const World &world);
+    void update(SDL_Window *window, const World &world);
     void draw(const World &world, const Camera &cam);
 };

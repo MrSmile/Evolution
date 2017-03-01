@@ -716,7 +716,7 @@ World::Tile::Tile(const Config &config, const Tile &old, size_t &total_food, siz
 }
 
 
-World::World() : total_food_count(0), total_creature_count(0), spawn_per_tile(4), next_id(0)
+World::World() : current_time(0), total_food_count(0), total_creature_count(0), spawn_per_tile(4), next_id(0)
 {
     config.order_x = config.order_y = 3;  // 8 x 8
     config.base_radius = tile_size / 64;
@@ -951,4 +951,6 @@ void World::next_step()
     for(auto &tile : tiles)
         for(Creature *cr = tile.first; cr; cr = cr->next)
             cr->post_process();
+
+    current_time++;
 }
