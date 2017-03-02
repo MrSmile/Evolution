@@ -9,6 +9,18 @@ using std::int8_t;   using std::uint8_t;
 using std::int16_t;  using std::uint16_t;
 using std::int32_t;  using std::uint32_t;
 using std::int64_t;  using std::uint64_t;
+using std::size_t;
+
+
+inline uint32_t rot32(uint32_t val, int n)
+{
+    return val >> n | val << (-n & 31);
+}
+
+inline uint64_t rot64(uint64_t val, int n)
+{
+    return val >> n | val << (-n & 63);
+}
 
 
 constexpr double pi = 3.14159265358979323846264338327950288;

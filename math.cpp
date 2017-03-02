@@ -301,9 +301,9 @@ Random::Random(uint64_t seed, uint64_t seq) : cur(0), inc(2 * seq + 1)
 
 uint32_t Random::uint32()  // algorithm: M.E. O'Neill / pcg-random.org
 {
-    uint64_t old = cur;  cur = old * 6364136223846793005ull + inc;
-    uint32_t res = ((old >> 18) ^ old) >> 27, rot = old >> 59u;
-    return (res >> rot) | (res << ((-rot) & 31));
+    uint64_t old = cur;
+    cur = old * 6364136223846793005ull + inc;
+    return rot32((old ^ old >> 18) >> 27, old >> 59);
 }
 
 uint32_t Random::uniform(uint32_t lim)

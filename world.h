@@ -6,8 +6,6 @@
 #include "math.h"
 #include <vector>
 
-using std::size_t;
-
 
 
 namespace Slot
