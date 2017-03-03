@@ -1,10 +1,9 @@
 // math.h : mathematical functions
 //
 
-#include "math.h"
+#include "stream.h"
 #include <algorithm>
 #include <climits>
-#include <cstdio>
 #include <ctime>
 #include <cmath>
 
@@ -299,6 +298,18 @@ Random::Random(uint64_t seed, uint64_t seq) : cur(0), inc(2 * seq + 1)
     uint32();  cur += seed;  uint32();
 }
 
+
+bool Random::load(InStream &stream)
+{
+    stream >> cur >> inc;  return stream && (inc & 1);
+}
+
+void Random::save(OutStream &stream) const
+{
+    stream << cur << inc;
+}
+
+
 uint32_t Random::uint32()  // algorithm: M.E. O'Neill / pcg-random.org
 {
     uint64_t old = cur;
@@ -346,6 +357,7 @@ uint32_t Random::geometric(uint32_t prob)
     }
     return res;
 }
+
 
 void random_test()
 {

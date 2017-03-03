@@ -2,7 +2,7 @@
 //
 
 #include "graph.h"
-#include <cstdio>
+#include "stream.h"
 
 
 
@@ -29,16 +29,47 @@ bool check_gl_error()
     std::printf("GL error: %s\n", text);  return false;
 }
 
-bool main_loop(SDL_Window *window)
+bool load_restart(World &world, const char *path)
+{
+    InFileStream stream;
+    if(!stream.open(path))
+    {
+        std::printf("Cannot open restart file \"%s\"!\n", path);  return false;
+    }
+    stream >> world;
+    if(!stream.close())
+    {
+        std::printf("Invalid restart file \"%s\"!\n", path);  return false;
+    }
+    return true;
+}
+
+bool save_restart(World &world)
+{
+    OutFileStream stream;
+    if(stream.open("default.save~"))
+    {
+        stream << world;
+        if(stream.close() && !std::rename("default.save~", "default.save"))
+        {
+            std::printf("Restart successfully saved.\n");
+            print_checksum(world, stream);  return true;
+        }
+    }
+    std::printf("Cannot save restart!\n");  return false;
+}
+
+bool main_loop(SDL_Window *window, char **args, int n)
 {
     //glEnable(GL_DEPTH_TEST);  glDepthFunc(GL_GREATER);  glClearDepth(0);
     glEnable(GL_FRAMEBUFFER_SRGB);  glEnable(GL_MULTISAMPLE);
     glEnable(GL_CULL_FACE);
 
     World world;
-    Camera cam(window);
-    Representation graph;
-    graph.update(window, world);
+    if(n <= 1)world.init();
+    else if(!load_restart(world, args[1]))return false;
+    Camera cam(window);  Representation graph;
+    graph.update(window, world, true);
 
     if(!check_gl_error())return false;
 
@@ -49,7 +80,7 @@ bool main_loop(SDL_Window *window)
         {
             if(play)
             {
-                world.next_step();  graph.update(window, world);
+                world.next_step();  graph.update(window, world, false);
             }
             cam.apply();
             glClearColor(0.0, 0.0, 0.0, 1.0);  glClear(GL_COLOR_BUFFER_BIT);
@@ -76,8 +107,11 @@ bool main_loop(SDL_Window *window)
                 play = !play;  break;
 
             case SDLK_RIGHT:
-                world.next_step();  graph.update(window, world);
+                world.next_step();  graph.update(window, world, true);
                 play = false;  break;
+
+            case SDLK_F5:
+                save_restart(world);  break;
 
             default:
                 continue;
@@ -98,7 +132,7 @@ bool sdl_error(const char *text)
     std::printf("%s%s\n", text, SDL_GetError());  return false;
 }
 
-int init()
+int init(char **args, int n)
 {
     if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3) || SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3))
         return sdl_error("Failed to set OpenGL version: ");
@@ -124,14 +158,14 @@ int init()
     SDL_GLContext context = SDL_GL_CreateContext(window);
     if(*SDL_GetError())return sdl_error("Cannot create OpenGL context: ");
 
-    bool res = main_loop(window);
+    bool res = main_loop(window, args, n);
     SDL_GL_DeleteContext(context);
     SDL_DestroyWindow(window);
     return res;
 }
 
-int main()
+int main(int n, char **args)
 {
     if(SDL_Init(SDL_INIT_VIDEO))return sdl_error("SDL_Init failed: ");
-    bool res = init();  SDL_Quit();  return res ? 0 : -1;
+    bool res = init(args, n);  SDL_Quit();  return res ? 0 : -1;
 }

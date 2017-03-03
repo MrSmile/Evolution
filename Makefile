@@ -1,7 +1,7 @@
 
 CXX = g++
-HEADER = math.h hash.h world.h graph.h shaders.h
-SOURCE = math.cpp hash.cpp world.cpp graph.cpp main.cpp
+HEADER = math.h hash.h stream.h world.h graph.h shaders.h
+SOURCE = math.cpp hash.cpp stream.cpp world.cpp graph.cpp main.cpp
 SHADER = food.vert food.frag creature.vert creature.frag
 FLAGS = -std=c++11 -Wall -Wno-parentheses -DBUILTIN
 D_FLAGS = -g -O0 -DDEBUG

@@ -10,6 +10,10 @@
 
 
 
+void print_checksum(const World &world, const OutStream &stream);
+
+
+
 struct Camera
 {
     static constexpr double scale_step = 1.0 / 4;
@@ -69,6 +73,6 @@ public:
     Representation();
     ~Representation();
 
-    void update(SDL_Window *window, const World &world);
+    void update(SDL_Window *window, const World &world, bool checksum);
     void draw(const World &world, const Camera &cam);
 };

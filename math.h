@@ -44,12 +44,22 @@ uint8_t calc_radius(uint64_t r2);
 
 
 
+class InStream;
+class OutStream;
+
 class Random
 {
     uint64_t cur, inc;
 
 public:
+    Random()
+    {
+    }
+
     Random(uint64_t seed, uint64_t seq);
+
+    bool load(InStream &stream);
+    void save(OutStream &stream) const;
 
     uint32_t uint32();
     uint32_t uniform(uint32_t lim);

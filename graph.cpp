@@ -2,10 +2,22 @@
 //
 
 #include "graph.h"
+#include "stream.h"
 #include "shaders.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+
+
+
+void print_checksum(const World &world, const OutStream &stream)
+{
+    const uint32_t *checksum = static_cast<const uint32_t *>(stream.checksum());
+    std::printf("Time: %llu, Checksum:", (unsigned long long)world.current_time);
+    for(unsigned i = 0; i < Hash::result_size / 4; i++)
+        std::printf(" %08lX", (unsigned long)bswap32(checksum[i]));
+    std::printf("\n");
+}
 
 
 
@@ -238,7 +250,7 @@ Representation::~Representation()
 }
 
 
-void Representation::update(SDL_Window *window, const World &world)
+void Representation::update(SDL_Window *window, const World &world, bool checksum)
 {
     obj_count[pass_food] = world.total_food_count;
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_ptr = nullptr;
@@ -274,6 +286,13 @@ void Representation::update(SDL_Window *window, const World &world)
     {
         glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
         glUnmapBuffer(GL_ARRAY_BUFFER);
+    }
+
+    if(checksum || !(world.current_time % 1000))
+    {
+        OutStream stream;  stream.initialize();
+        stream << world;  stream.finalize();
+        print_checksum(world, stream);
     }
 
     char buf[256];
