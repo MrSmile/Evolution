@@ -9,5 +9,5 @@ void main()
 {
     vec2 pos = food.xy + pt.xy * food.z;
     gl_Position = vec4(transform.xy + pos * transform.zw, 0.5, 1.0);
-    color = vec4(0.0, 1.0, 0.0, 1.0) + food.w * vec4(1.0, -1.0, 0.0, 0.0);
+    color = mix(vec4(0.0, 1.0, 0.0, 1.0), vec4(1.0, 0.0, 0.0, 0.0), food.w);
 }

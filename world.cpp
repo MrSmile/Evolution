@@ -252,12 +252,12 @@ Genome::Genome(const Config &config, Random &rand, const Genome &parent, const G
         const Gene *pos_f = father->genes.data();
         for(uint32_t i = 0; i < chromosome_count; i += 2)
         {
-            if(pairs[i >> 5] & (1 << (i & 31)))
+            if(pairs[i >> 5] & uint32_t(1) << (i & 31))
                 seqs.emplace_back(pos_m + parent.chromosomes[i], parent.chromosomes[i + 1]);
             else seqs.emplace_back(pos_m, parent.chromosomes[i]);
             pos_m += parent.chromosomes[i] + parent.chromosomes[i + 1];
 
-            if(pairs[i >> 5] & (2 << (i & 31)))
+            if(pairs[i >> 5] & uint32_t(2) << (i & 31))
                 seqs.emplace_back(pos_f + father->chromosomes[i], father->chromosomes[i + 1]);
             else seqs.emplace_back(pos_f, father->chromosomes[i]);
             pos_f += father->chromosomes[i] + father->chromosomes[i + 1];
@@ -352,7 +352,7 @@ Genome::Genome(const Config &config, Random &rand, const Genome &parent, const G
     pos = rand.geometric(config.bit_mutate_factor);
     while(pos < 64 * total_size)
     {
-        genes[pos >> 6].data ^= 1 << (pos & 63);
+        genes[pos >> 6].data ^= uint64_t(1) << (pos & 63);
         pos += rand.geometric(config.bit_mutate_factor) + 1;
     }
 }
@@ -444,7 +444,7 @@ bool GenomeProcessor::update(SlotData &slot)
     case Slot::Womb:     return update(slot, f_base | f_output);
     case Slot::Eye:      return update(slot, f_angle1 | f_angle2 | f_radius | f_vision);
     case Slot::Radar:    return update(slot, f_angle1 | f_angle2 | f_vision);
-    case Slot::Claw:     return update(slot, f_base | f_angle1 | f_angle2 | f_output);
+    case Slot::Claw:     return update(slot, f_base | f_angle1 | f_angle2 | f_radius | f_output);
     case Slot::Hide:     return update(slot, f_base | f_useful);
     case Slot::Leg:      return update(slot, f_base | f_angle1 | f_output);
     case Slot::Rotator:  return update(slot, f_angle2 | f_output);
@@ -1215,6 +1215,7 @@ void World::next_step()
         tiles.emplace_back(config, old[i], total_food_count, spawn_per_tile);
 
     total_creature_count = 0;
+    Creature *del_queue, **del_last = &del_queue;
     for(size_t i = 0; i < old.size(); i++)
     {
         spawn_grass(tiles[i], i & config.mask_x, i >> config.order_x);
@@ -1228,7 +1229,8 @@ void World::next_step()
             uint32_t dead_energy = cr->execute_step(config);
             if(dead_energy)
             {
-                delete cr;  spawn_meat(tiles[i], prev_pos, dead_energy);  continue;
+                *del_last = cr;  del_last = &cr->next;  // potential father
+                spawn_meat(tiles[i], prev_pos, dead_energy);  continue;
             }
 
             size_t index = tile_index(cr->pos);
@@ -1244,6 +1246,11 @@ void World::next_step()
                 else spawn_meat(tiles[i], prev_pos, womb.energy);
             }
         }
+    }
+    *del_last = nullptr;
+    while(del_queue)
+    {
+        Creature *cr = del_queue;  del_queue = cr->next;  delete cr;
     }
     old.clear();
 
@@ -1262,7 +1269,7 @@ void World::init()
     config.genome_split_factor = ~(uint32_t(-1) / 64);
     config.chromosome_replace_factor = ~(uint32_t(-1) / 64);
     config.chromosome_copy_prob = uint32_t(-1) / 2;
-    config.bit_mutate_factor = ~(uint32_t(-1) / 1024);
+    config.bit_mutate_factor = ~(uint32_t(-1) / 256);
 
     config.slot_bits = 8;  // 256 slots
     config.base_bits = 8;
