@@ -4,6 +4,7 @@
 #pragma once
 
 #include "world.h"
+#include "resource.h"
 #include <epoxy/gl.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_opengl.h>
@@ -62,9 +63,7 @@ class Representation
     size_t obj_count[pass_count];
 
 
-    void create_program(Pass pass, const char *name,
-        const unsigned char *vert_src, unsigned vert_len,
-        const unsigned char *frag_src, unsigned frag_len);
+    void create_program(Pass pass, Shader::Index id);
 
     void make_food_shape();
     void make_creature_shape();

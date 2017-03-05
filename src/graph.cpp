@@ -3,7 +3,6 @@
 
 #include "graph.h"
 #include "stream.h"
-#include "shaders.h"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -123,33 +122,32 @@ struct CreatureData
 };
 
 
-GLuint load_shader(GLint type, const char *name, const unsigned char *data, GLint size)
+GLuint load_shader(GLint type, const char *name, const char *data, GLint size)
 {
-    GLuint shader = glCreateShader(type);  char msg[65536];  GLsizei len;
-    glShaderSource(shader, 1, reinterpret_cast<const GLchar **>(&data), &size);
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &data, &size);
+
+    char msg[65536];  GLsizei len;
     glCompileShader(shader);  glGetShaderInfoLog(shader, sizeof(msg), &len, msg);
     if(len)std::printf("%s shader log:\n%s\n", name, msg);  return shader;
 }
 
-void Representation::create_program(Pass pass, const char *name,
-    const unsigned char *vert_src, unsigned vert_len, const unsigned char *frag_src, unsigned frag_len)
+void Representation::create_program(Pass pass, Shader::Index id)
 {
-    prog[pass] = glCreateProgram();
-    GLuint vert = load_shader(GL_VERTEX_SHADER, "Vertex", vert_src, vert_len);
-    GLuint frag = load_shader(GL_FRAGMENT_SHADER, "Fragment", frag_src, frag_len);
+    prog[pass] = glCreateProgram();  const ShaderDesc &shader = shaders[id];
+    GLuint vert = load_shader(GL_VERTEX_SHADER, "Vertex", shader.vert_src, shader.vert_len);
+    GLuint frag = load_shader(GL_FRAGMENT_SHADER, "Fragment", shader.frag_src, shader.frag_len);
     glAttachShader(prog[pass], vert);  glAttachShader(prog[pass], frag);
 
     char msg[65536];  GLsizei len;
     glLinkProgram(prog[pass]);  glGetProgramInfoLog(prog[pass], sizeof(msg), &len, msg);
-    if(len)std::printf("Shader program \"%s\" log:\n%s\n", name, msg);
+    if(len)std::printf("Shader program \"%s\" log:\n%s\n", shader.name, msg);
 
     glDetachShader(prog[pass], vert);  glDetachShader(prog[pass], frag);
     glDeleteShader(vert);  glDeleteShader(frag);
 
     i_transform[pass] = glGetUniformLocation(prog[pass], "transform");
 }
-
-#define SHADER(src) #src, shaders_##src##_vert, shaders_##src##_vert_len, shaders_##src##_frag, shaders_##src##_frag_len
 
 
 void Representation::make_food_shape()
@@ -215,8 +213,8 @@ void register_attribute(GLuint index, int vec_size, GLenum type, GLboolean norm,
 
 Representation::Representation()
 {
-    create_program(pass_food, SHADER(food));
-    create_program(pass_creature, SHADER(creature));
+    create_program(pass_food, Shader::food);
+    create_program(pass_creature, Shader::creature);
 
     glGenVertexArrays(pass_count, arr);
     glGenBuffers(buf_count, buf);

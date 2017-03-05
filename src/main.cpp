@@ -155,6 +155,12 @@ int init(char **args, int n)
         SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
     if(!window)return sdl_error("Cannot create window: ");
 
+    const ImageDesc &icon = images[Image::icon];
+    SDL_Surface *icon_surf = SDL_CreateRGBSurfaceFrom(const_cast<char *>(icon.pixels),
+        icon.width, icon.height, 32, 4 * icon.width, 0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000);
+    SDL_SetWindowIcon(window, icon_surf);
+    SDL_FreeSurface(icon_surf);
+
     SDL_GLContext context = SDL_GL_CreateContext(window);
     if(*SDL_GetError())return sdl_error("Cannot create OpenGL context: ");
 
