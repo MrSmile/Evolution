@@ -384,11 +384,11 @@ void Genome::save(OutStream &stream) const
 
 
 
-// GenomeProcessor struct
+// GenomeProcessor class
 
-void GenomeProcessor::reset()
+void GenomeProcessor::State::reset(size_t link_pos)
 {
-    link_start = links.size();
+    link_start = link_pos;
     link_count = core_count = 0;
     act_level = min_level = max_level = 0;
     type_and = -1;  type_or = 0;
@@ -399,7 +399,7 @@ void GenomeProcessor::reset()
     flags = 0;
 }
 
-bool GenomeProcessor::update(SlotData &slot, int use)
+bool GenomeProcessor::State::update(SlotData &slot, int use)
 {
     if(use & f_base)slot.base = base / core_count + 1;
     if(use & f_radius)
@@ -433,7 +433,7 @@ bool GenomeProcessor::update(SlotData &slot, int use)
     return true;
 }
 
-bool GenomeProcessor::update(SlotData &slot)
+bool GenomeProcessor::State::update(SlotData &slot)
 {
     if(!core_count)return true;
     if(type_or != type_and)return false;
@@ -453,63 +453,71 @@ bool GenomeProcessor::update(SlotData &slot)
     }
 }
 
-void GenomeProcessor::append_slot()
+void GenomeProcessor::State::create_slot(SlotData &slot, size_t link_pos)
 {
-    size_t index = slots.size();
-    slots.emplace_back(link_start, link_count, act_level, min_level, max_level);
-    if(update(slots[index]))slots[index].type = Slot::Type(type_or);
-    else slots[index].neiro_state = s_always_off;
+    slot.link_start = link_start;  slot.link_count = link_count;
+    slot.act_level = act_level;  slot.min_level = min_level;  slot.max_level = max_level;
+    slot.neiro_state = s_normal;  slot.used = false;  slot.type = Slot::Invalid;
+    if(update(slot))slot.type = Slot::Type(type_or);
+    else slot.neiro_state = s_always_off;
+    reset(link_pos);
 }
 
-
-GenomeProcessor::GenomeProcessor(const Config &config, uint32_t max_links) :
-    slot_count(uint32_t(1) << config.slot_bits)
+void GenomeProcessor::State::process_gene(const Config &config, Genome::Gene &gene, std::vector<LinkData> &links)
 {
-    links.reserve(max_links);  reset();
-}
-
-void GenomeProcessor::process(const Config &config, Genome::Gene gene)
-{
-    uint32_t slot = gene.take_bits(config.slot_bits);
     uint32_t type = gene.take_bits(slot_type_bits);
-    while(slots.size() < slot)
+    if(!type)
     {
-        append_slot();  reset();
-    }
-    if(type)
-    {
-        core_count++;
-        type_or  |= type;
-        type_and &= type;
-
-        base += gene.take_bits(config.base_bits);
-        angle_t angle1 = gene.take_bits(angle_bits);
-        angle_t angle2 = gene.take_bits(angle_bits);
-        radius += gene.take_bits(radius_bits);
-        flags |= gene.take_bits(flag_bits);
-
-        // core_count < 2^14
-        uint32_t r_x4 = uint32_t(1) << 18;
-        angle1_x += r_sin(r_x4, angle1 + angle_90);
-        angle1_y += r_sin(r_x4, angle1);
-        angle2_x += r_sin(r_x4, angle2 + angle_90);
-        angle2_y += r_sin(r_x4, angle2);
-
-        angle1++;  angle2++;
-        angle1_x += r_sin(r_x4, angle1 + angle_90);
-        angle1_y += r_sin(r_x4, angle1);
-        angle2_x += r_sin(r_x4, angle2 + angle_90);
-        angle2_y += r_sin(r_x4, angle2);
-    }
-    else
-    {
-        int32_t weight = gene.take_bits_signed(config.base_bits);
+        int32_t weight = gene.take_bits_signed(config.base_bits);  if(!weight)return;
         uint32_t source = gene.take_bits(config.slot_bits);
         act_level += weight * gene.take_bits(8);
 
         (weight < 0 ? min_level : max_level) += 255 * weight;
-        links.emplace_back(weight, source);  link_count++;
+        links.emplace_back(weight, source);  link_count++;  return;
     }
+
+    core_count++;
+    type_or  |= type;
+    type_and &= type;
+
+    base += gene.take_bits(config.base_bits);
+    angle_t angle1 = gene.take_bits(angle_bits);
+    angle_t angle2 = gene.take_bits(angle_bits);
+    radius += gene.take_bits(radius_bits);
+    flags |= gene.take_bits(flag_bits);
+
+    // core_count < 2^14
+    uint32_t r_x4 = uint32_t(1) << 18;
+    angle1_x += r_sin(r_x4, angle1 + angle_90);
+    angle1_y += r_sin(r_x4, angle1);
+    angle2_x += r_sin(r_x4, angle2 + angle_90);
+    angle2_y += r_sin(r_x4, angle2);
+
+    angle1++;  angle2++;
+    angle1_x += r_sin(r_x4, angle1 + angle_90);
+    angle1_y += r_sin(r_x4, angle1);
+    angle2_x += r_sin(r_x4, angle2 + angle_90);
+    angle2_y += r_sin(r_x4, angle2);
+}
+
+
+void GenomeProcessor::update(const Config &config, Genome &genome)
+{
+    slot_count = uint32_t(1) << config.slot_bits;  working_links = 0;
+    slots.resize(slot_count);  links.clear();
+
+    std::vector<Genome::Gene> genes = genome.genes;
+    std::sort(genes.begin(), genes.end());
+    links.reserve(genes.size());
+
+    State state;  size_t index = 0;
+    for(Genome::Gene gene : genes)
+    {
+        uint32_t slot = gene.take_bits(config.slot_bits);
+        while(index < slot)state.create_slot(slots[index++], links.size());
+        state.process_gene(config, gene, links);
+    }
+    while(index < slot_count)state.create_slot(slots[index++], links.size());
 }
 
 struct Reference
@@ -534,11 +542,6 @@ struct Reference
 
 void GenomeProcessor::finalize()
 {
-    while(slots.size() < slot_count)
-    {
-        append_slot();  reset();
-    }
-
     std::vector<uint32_t> queue;  queue.reserve(slot_count);
     std::vector<Reference> refs;  refs.reserve(links.size() + 1);
     for(uint32_t i = 0; i < slot_count; i++)
@@ -621,6 +624,21 @@ void GenomeProcessor::finalize()
         }
     }
 };
+
+void GenomeProcessor::process(const Config &config, Genome &genome)
+{
+    update(config, genome);  finalize();
+    passive_cost.initial  = genome.genes.size() * config.gene_init_cost;
+    passive_cost.per_tick = genome.genes.size() * config.gene_pass_rate;
+    std::memset(count, 0, sizeof(count));
+    for(const auto &slot : slots)
+    {
+        passive_cost.initial  += config.cost[slot.type].initial;
+        passive_cost.per_tick += config.cost[slot.type].per_tick;
+        if(slot.type == Slot::Hide)passive_cost.initial += slot.base * config.hide_mul;
+        if(slot.used)count[slot.type]++;
+    }
+}
 
 
 
@@ -729,31 +747,33 @@ uint32_t update_counters(const uint32_t *count, uint32_t *offset, uint32_t &pos,
     offset[type] = pos;  pos += count[type];  return count[type];
 }
 
-Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &processor, uint32_t count[],
-    uint64_t id, const Position &pos, angle_t angle, const Config::SlotCost &passive, uint32_t spawn_energy) :
-    id(id), genome(std::move(genome)), pos(pos), angle(angle), passive_energy(passive.initial), max_energy(0),
-    passive_cost(passive.per_tick), max_life(0), damage(0), father(config.base_r2), flags(f_creature)
+Creature::Creature(const Config &config, Genome &genome, GenomeProcessor &proc,
+    uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy) :
+    id(id), genome(std::move(genome)), pos(pos), angle(angle),
+    passive_energy(proc.passive_cost.initial), max_energy(0),
+    passive_cost(proc.passive_cost.per_tick), max_life(0),
+    damage(0), father(config.base_r2), flags(f_creature)
 {
     uint32_t offset[Slot::Invalid], n = 0;
-    count[Slot::Signal] += count[Slot::Mouth];
-    wombs.reserve(update_counters(count, offset, n, Slot::Womb));
-    claws.reserve(update_counters(count, offset, n, Slot::Claw));
-    legs.reserve(update_counters(count, offset, n, Slot::Leg));
-    rotators.reserve(update_counters(count, offset, n, Slot::Rotator));
-    signals.reserve(update_counters(count, offset, n, Slot::Signal));
-    update_counters(count, offset, n, Slot::Link);
+    proc.count[Slot::Signal] += proc.count[Slot::Mouth];
+    wombs.reserve(update_counters(proc.count, offset, n, Slot::Womb));
+    claws.reserve(update_counters(proc.count, offset, n, Slot::Claw));
+    legs.reserve(update_counters(proc.count, offset, n, Slot::Leg));
+    rotators.reserve(update_counters(proc.count, offset, n, Slot::Rotator));
+    signals.reserve(update_counters(proc.count, offset, n, Slot::Signal));
+    update_counters(proc.count, offset, n, Slot::Link);
     order.reserve(n);  neirons.resize(n);
 
-    stomachs.reserve(update_counters(count, offset, n, Slot::Stomach));
-    hides.reserve(update_counters(count, offset, n, Slot::Hide));
-    eyes.reserve(update_counters(count, offset, n, Slot::Eye));
-    radars.reserve(update_counters(count, offset, n, Slot::Radar));
+    stomachs.reserve(update_counters(proc.count, offset, n, Slot::Stomach));
+    hides.reserve(update_counters(proc.count, offset, n, Slot::Hide));
+    eyes.reserve(update_counters(proc.count, offset, n, Slot::Eye));
+    radars.reserve(update_counters(proc.count, offset, n, Slot::Radar));
     std::vector<slot_t> slots(n);  input.resize(n, 0);
 
-    std::vector<uint32_t> mapping(processor.slot_count, -1);
-    for(uint32_t i = 0; i < processor.slot_count; i++)
+    std::vector<uint32_t> mapping(proc.slot_count, -1);
+    for(uint32_t i = 0; i < proc.slot_count; i++)
     {
-        const auto &slot = processor.slots[i];  if(!slot.used)continue;
+        const auto &slot = proc.slots[i];  if(!slot.used)continue;
 
         uint32_t index = offset[append_slot(config, slot)]++;
         mapping[i] = index;  slots[index] = i;
@@ -761,24 +781,24 @@ Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &
         if(index < neirons.size())order.push_back(index);
     }
     assert(order.size() == neirons.size());
-    energy = std::min(spawn_energy - passive.initial, max_energy);
+    energy = std::min(spawn_energy - proc.passive_cost.initial, max_energy);
     total_life = max_life;
 
-    assert(wombs.size()    == count[Slot::Womb]);
-    assert(claws.size()    == count[Slot::Claw]);
-    assert(legs.size()     == count[Slot::Leg]);
-    assert(rotators.size() == count[Slot::Rotator]);
-    assert(signals.size()  == count[Slot::Signal]);
+    assert(wombs.size()    == proc.count[Slot::Womb]);
+    assert(claws.size()    == proc.count[Slot::Claw]);
+    assert(legs.size()     == proc.count[Slot::Leg]);
+    assert(rotators.size() == proc.count[Slot::Rotator]);
+    assert(signals.size()  == proc.count[Slot::Signal]);
 
-    assert(stomachs.size() == count[Slot::Stomach]);
-    assert(hides.size()    == count[Slot::Hide]);
-    assert(eyes.size()     == count[Slot::Eye]);
-    assert(radars.size()   == count[Slot::Radar]);
+    assert(stomachs.size() == proc.count[Slot::Stomach]);
+    assert(hides.size()    == proc.count[Slot::Hide]);
+    assert(eyes.size()     == proc.count[Slot::Eye]);
+    assert(radars.size()   == proc.count[Slot::Radar]);
 
-    links.reserve(processor.working_links);
+    links.reserve(proc.working_links);
     for(size_t i = 0; i < neirons.size(); i++)
     {
-        const auto &slot = processor.slots[slots[i]];
+        const auto &slot = proc.slots[slots[i]];
         switch(slot.neiro_state)
         {
         case GenomeProcessor::s_input:       continue;
@@ -789,40 +809,22 @@ Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &
         uint32_t beg = slot.link_start, end = beg + slot.link_count;
         for(uint32_t j = beg; j < end; j++)
         {
-            const auto &link = processor.links[j];
+            const auto &link = proc.links[j];
             uint32_t source = mapping[link.source];
             if(source != uint32_t(-1))links.emplace_back(source, i, link.weight);
-            else if(processor.slots[link.source].neiro_state == GenomeProcessor::s_always_on)
+            else if(proc.slots[link.source].neiro_state == GenomeProcessor::s_always_on)
                 neirons[i].act_level -= 255 * link.weight;
         }
     }
-    assert(links.size() == processor.working_links);
+    assert(links.size() == proc.working_links);
 }
 
 Creature *Creature::spawn(const Config &config, Genome &genome,
     uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy)
 {
-    std::vector<Genome::Gene> genes = genome.genes;
-    std::sort(genes.begin(), genes.end());
-
-    GenomeProcessor processor(config, genes.size());
-    for(const auto &gene : genes)processor.process(config, gene);
-    processor.finalize();
-
-    Config::SlotCost passive;
-    passive.initial  = genes.size() * config.gene_init_cost;
-    passive.per_tick = genes.size() * config.gene_pass_rate;
-    uint32_t count[Slot::Invalid] = {};
-    for(auto &slot : processor.slots)
-    {
-        passive.initial  += config.cost[slot.type].initial;
-        passive.per_tick += config.cost[slot.type].per_tick;
-        if(slot.type == Slot::Hide)passive.initial += slot.base * config.hide_mul;
-        if(slot.used)count[slot.type]++;
-    }
-    if(spawn_energy < passive.initial)return nullptr;  // not enough energy
-
-    return new Creature(config, genome, processor, count, id, pos, angle, passive, spawn_energy);
+    GenomeProcessor proc(config, genome);
+    if(spawn_energy < proc.passive_cost.initial)return nullptr;
+    return new Creature(config, genome, proc, id, pos, angle, spawn_energy);
 }
 
 Creature *Creature::spawn(const Config &config, Random &rand, const Creature &parent,

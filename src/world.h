@@ -169,8 +169,9 @@ struct Genome
 };
 
 
-struct GenomeProcessor
+class GenomeProcessor
 {
+public:
     struct LinkData
     {
         int32_t weight;
@@ -196,14 +197,9 @@ struct GenomeProcessor
         uint32_t base, radius;
         angle_t angle1, angle2;
         uint8_t flags;
-
-        SlotData(uint32_t link_start, uint32_t link_count, int32_t act_level, int32_t min_level, int32_t max_level) :
-            link_start(link_start), link_count(link_count), act_level(act_level), min_level(min_level), max_level(max_level),
-            neiro_state(s_normal), used(false), type(Slot::Invalid)
-        {
-        }
     };
 
+private:
     enum UseFlags
     {
         f_base   = 1 << 0,
@@ -216,30 +212,50 @@ struct GenomeProcessor
         f_output = 1 << 7
     };
 
+    class State
+    {
+        uint32_t link_start, link_count, core_count;
+        int32_t act_level, min_level, max_level;
+        uint32_t type_and, type_or;
 
-    uint32_t slot_count;
-    uint32_t link_start, link_count, core_count;
-    int32_t act_level, min_level, max_level;
-    uint32_t type_and, type_or;
+        uint32_t base, radius;
+        int32_t angle1_x, angle1_y;
+        int32_t angle2_x, angle2_y;
+        uint8_t flags;
 
-    uint32_t base, radius;
-    int32_t angle1_x, angle1_y;
-    int32_t angle2_x, angle2_y;
-    uint8_t flags;
+        void reset(size_t link_pos);
+        bool update(SlotData &slot, int use);
+        bool update(SlotData &slot);
 
-    std::vector<LinkData> links;
-    std::vector<SlotData> slots;
-    uint32_t working_links;
+    public:
+        State()
+        {
+            reset(0);
+        }
+
+        void create_slot(SlotData &slot, size_t link_pos);
+        void process_gene(const Config &config, Genome::Gene &gene, std::vector<LinkData> &links);
+    };
 
 
-    void reset();
-    bool update(SlotData &slot, int use);
-    bool update(SlotData &slot);
-    void append_slot();
-
-    GenomeProcessor(const Config &config, uint32_t max_links);
-    void process(const Config &config, Genome::Gene gene);
+    void update(const Config &config, Genome &genome);
     void finalize();
+
+
+public:
+    uint32_t slot_count, working_links;
+    std::vector<SlotData> slots;
+    std::vector<LinkData> links;
+    Config::SlotCost passive_cost;
+    uint32_t count[Slot::Invalid];
+
+
+    GenomeProcessor(const Config &config, Genome &genome)
+    {
+        process(config, genome);
+    }
+
+    void process(const Config &config, Genome &genome);
 };
 
 
@@ -381,8 +397,8 @@ struct Creature
     Creature &operator = (const Creature &) = delete;
 
     Slot::Type append_slot(const Config &config, const GenomeProcessor::SlotData &slot);
-    Creature(const Config &config, Genome &genome, const GenomeProcessor &processor, uint32_t count[],
-        uint64_t id, const Position &pos, angle_t angle, const Config::SlotCost &passive, uint32_t energy);
+    Creature(const Config &config, Genome &genome, GenomeProcessor &proc,
+        uint64_t id, const Position &pos, angle_t angle, uint32_t energy);
     static Creature *spawn(const Config &config, Genome &genome,
         uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
     static Creature *spawn(const Config &config, Random &rand, const Creature &parent,
