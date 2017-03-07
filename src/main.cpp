@@ -69,7 +69,7 @@ bool main_loop(SDL_Window *window, char **args, int n)
     if(n <= 1)world.init();
     else if(!load_restart(world, args[1]))return false;
     Camera cam(window);  Representation graph;
-    graph.update(window, world, true);
+    graph.update(window, world, cam, true);
 
     if(!check_gl_error())return false;
 
@@ -80,17 +80,19 @@ bool main_loop(SDL_Window *window, char **args, int n)
         {
             if(play)
             {
-                world.next_step();  graph.update(window, world, false);
+                world.next_step();  graph.update(window, world, cam, false);
             }
-            cam.apply();
-            glClearColor(0.0, 0.0, 0.0, 1.0);  glClear(GL_COLOR_BUFFER_BIT);
             graph.draw(world, cam);  if(!check_gl_error())return false;
             SDL_GL_SwapWindow(window);  continue;
         }
         switch(evt.type)
         {
+        case SDL_MOUSEBUTTONDOWN:
+            if(evt.button.button != SDL_BUTTON_RIGHT)continue;
+            graph.select(world, cam, evt.button.x, evt.button.y);  break;
+
         case SDL_MOUSEMOTION:
-            if(!(evt.motion.state & SDL_BUTTON(1)))continue;
+            if(!(evt.motion.state & SDL_BUTTON_LMASK))continue;
             cam.move(evt.motion.xrel, evt.motion.yrel);  break;
 
         case SDL_MOUSEWHEEL:
@@ -107,7 +109,7 @@ bool main_loop(SDL_Window *window, char **args, int n)
                 play = !play;  break;
 
             case SDLK_RIGHT:
-                world.next_step();  graph.update(window, world, true);
+                world.next_step();  graph.update(window, world, cam, true);
                 play = false;  break;
 
             case SDLK_F5:
