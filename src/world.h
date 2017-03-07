@@ -12,18 +12,18 @@ namespace Slot
 {
     enum Type : uint8_t
     {
-        Link    =  0,  // link
-        Mouth   =  1,  // out
-        Stomach =  2,  // in
-        Womb    =  3,  // out
-        Eye     =  4,  // in
-        Radar   =  5,  // in
-        Claw    =  6,  // out
-        Hide    =  7,  // in
-        Leg     =  8,  // out
-        Rotator =  9,  // out
-        Signal  = 10,  // out
-        Invalid = 11
+        link    =  0,  // link
+        mouth   =  1,  // out
+        stomach =  2,  // in
+        womb    =  3,  // out
+        eye     =  4,  // in
+        radar   =  5,  // in
+        claw    =  6,  // out
+        hide    =  7,  // in
+        leg     =  8,  // out
+        rotator =  9,  // out
+        signal  = 10,  // out
+        invalid = 11
     };
 }
 
@@ -50,7 +50,7 @@ struct Config
     uint32_t chromosome_copy_prob;
     uint32_t bit_mutate_factor;
 
-    SlotCost cost[Slot::Invalid];
+    SlotCost cost[Slot::invalid];
     uint32_t gene_init_cost, gene_pass_rate;
     uint32_t eating_cost, signal_cost;
 
@@ -84,10 +84,7 @@ struct Detector
     uint64_t min_r2, id;
     Creature *target;
 
-    Detector()
-    {
-    }
-
+    Detector() = default;
     explicit Detector(uint64_t r2);
     void reset(uint64_t r2);
     void update(uint64_t r2, Creature *cr);
@@ -110,10 +107,7 @@ struct Food
     Position pos;
     Detector eater;
 
-    Food()
-    {
-    }
-
+    Food() = default;
     Food(const Config &config, Type type, const Position &pos);
     Food(const Config &config, const Food &food);
 
@@ -130,10 +124,7 @@ struct Genome
     {
         uint64_t data;
 
-        Gene()
-        {
-        }
-
+        Gene() = default;
         Gene(const Config &config, uint32_t slot, Slot::Type type,
             uint32_t base, angle_t angle1, angle_t angle2, uint32_t radius, uint8_t flags);
         Gene(const Config &config, uint32_t slot, int32_t weight, uint32_t source, uint8_t offset);
@@ -157,10 +148,7 @@ struct Genome
     std::vector<uint32_t> chromosomes;
     std::vector<Gene> genes;
 
-    Genome()
-    {
-    }
-
+    Genome() = default;
     explicit Genome(const Config &config);
     Genome(const Config &config, Random &rand, const Genome &parent, const Genome *father);
 
@@ -238,7 +226,7 @@ private:
     };
 
 
-    void update(const Config &config, Genome &genome);
+    void update(const Config &config, const Genome &genome);
     void finalize();
 
 
@@ -247,15 +235,17 @@ public:
     std::vector<SlotData> slots;
     std::vector<LinkData> links;
     Config::SlotCost passive_cost;
-    uint32_t count[Slot::Invalid];
+    uint32_t count[Slot::invalid];
 
 
-    GenomeProcessor(const Config &config, Genome &genome)
+    GenomeProcessor() = default;
+
+    GenomeProcessor(const Config &config, const Genome &genome)
     {
         process(config, genome);
     }
 
-    void process(const Config &config, Genome &genome);
+    void process(const Config &config, const Genome &genome);
 };
 
 
