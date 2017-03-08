@@ -143,7 +143,7 @@ bool sdl_error(const char *text)
 
 int init(char **args, int n)
 {
-    if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3) || SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3))
+    if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4) || SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2))
         return sdl_error("Failed to set OpenGL version: ");
     if(SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE))
         return sdl_error("Failed to set core profile: ");

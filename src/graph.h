@@ -60,9 +60,10 @@ class Representation
         const Creature *cr;
         GenomeProcessor proc;
         std::vector<uint32_t> mapping;
+        std::vector<uint32_t> offsets;
         Position pos;  int slot;
 
-        Selection() : id(-1), cr(nullptr)
+        Selection() : id(-1), cr(nullptr), slot(-1)
         {
         }
     };

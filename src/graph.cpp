@@ -23,18 +23,20 @@ namespace Gui
     constexpr int flag_width   =  8;
     constexpr int flag_height  =  8;
 
-    constexpr unsigned icon_offset  = 16;
-    constexpr unsigned icon_row     =  8;
-    constexpr unsigned flag_row     =  3;
+    constexpr unsigned icon_offset  = 8;
+    constexpr unsigned icon_row     = 4;
+    constexpr unsigned flag_row     = 3;
     constexpr unsigned end_flag = 1 << 7;
 
     constexpr int line_spacing = line_height + 2 * line_margin;
-    constexpr int panel_width = 5 * icon_width + 20 * digit_width + 2 * line_margin;
+    constexpr unsigned slot_offset = 4 * digit_width + icon_width;
+    constexpr int panel_width = 6 * slot_offset + 2 * digit_width + 2 * line_margin;
 
     enum Icon
     {
         i_weight = Slot::invalid + 1, i_target, i_volume,
-        i_angle, i_radius, i_damage, i_life, i_speed, i_none = 0
+        i_angle, i_radius, i_damage, i_life, i_speed,
+        i_off, i_active, i_on, i_none = 0
     };
 
     struct TypeIcons
@@ -57,6 +59,25 @@ namespace Gui
         {i_none,   i_none,  i_angle, i_none,   0},  // rotator
         {i_none,   i_none,  i_none,  i_none,   3},  // signal
         {i_none,   i_none,  i_none,  i_none,   0},  // invalid
+    };
+
+    struct Position
+    {
+        int x, y;
+    };
+
+    enum LinkTypes
+    {
+        l_end_up = 1, l_end_dn = 2, l_end_mid = 4,
+        l_beg_up = 8, l_beg_dn, l_br_up, l_br_dn, l_up, l_dn
+    };
+
+    const Position links[] =
+    {
+        {0x30, 0x70}, {0x50, 0x70}, {0x50, 0x50}, {0x40, 0x18},
+        {0x50, 0x10}, {0x50, 0x40}, {0x50, 0x20}, {0x40, 0x50},
+        {0x40, 0x30}, {0x40, 0x70}, {0x40, 0x40}, {0x40, 0x60},
+        {0x60, 0x00}, {0x70, 0x00}
     };
 }
 
@@ -178,9 +199,9 @@ struct GuiBack
 struct GuiQuad
 {
     GLshort x, y;
-    GLubyte tx, ty, width, height;
+    GLushort tx, ty, width, height;
 
-    GuiQuad(GLshort x, GLshort y, GLubyte tx, GLubyte ty, GLubyte width, GLubyte height) :
+    GuiQuad(GLshort x, GLshort y, GLushort tx, GLushort ty, GLushort width, GLushort height) :
         x(x), y(y), tx(tx), ty(ty), width(width), height(height)
     {
     }
@@ -341,7 +362,7 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
     register_attribute(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), 0);
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_gui]);
     register_attribute(1, 2, GL_SHORT, GL_FALSE, sizeof(GuiQuad), 0);
-    register_attribute(2, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(GuiQuad), 2 * sizeof(GLshort));
+    register_attribute(2, 4, GL_UNSIGNED_SHORT, GL_FALSE, sizeof(GuiQuad), 2 * sizeof(GLshort));
 
     glBindVertexArray(0);
 
@@ -437,10 +458,88 @@ void put_flags(std::vector<GuiQuad> &buf, int x, int y, unsigned flags, unsigned
     }
 }
 
+int put_link(std::vector<GuiQuad> &buf, int x, int y, size_t &prev, int type1, int type2, int line)
+{
+    int type = type1;
+    if(prev != size_t(-1))
+    {
+        int yy = buf[prev].y + buf[prev].height;  type = type2;
+        buf.emplace_back(x, yy, Gui::links[line].x, Gui::links[line].y, Gui::icon_width, y - yy);
+    }
+    prev = buf.size();  assert(type);
+    buf.emplace_back(x, y, Gui::links[type].x, Gui::links[type].y, Gui::icon_width, Gui::line_height);
+    return type;
+}
+
+struct LinkPainter
+{
+    std::vector<GuiQuad> &buf;
+    int x, y;  uint32_t dst;
+
+    size_t prev;  bool output;  int type;
+
+    LinkPainter(std::vector<GuiQuad> &buf, int x, int y, int dst) :
+        buf(buf), x(x), y(y), dst(dst), prev(-1), output(false)
+    {
+    }
+
+    void put_weight(int xx, int yy, int32_t weight)
+    {
+        put_icon(buf, xx, yy, Gui::i_weight);  xx = write_number(buf, std::abs(weight), xx, yy) - Gui::digit_width;
+        buf.emplace_back(xx, yy, (weight < 0 ? 10 : 11) * Gui::digit_width, 0, Gui::digit_width, Gui::line_height);
+    }
+
+    void process(uint32_t src, int32_t weight)
+    {
+        if(!weight)return;
+        int yy = y + src * Gui::line_spacing;
+        put_weight(x - Gui::icon_width, yy, weight);
+
+        if(src < dst)
+        {
+            type = put_link(buf, x, yy, prev, Gui::l_beg_up, Gui::l_br_up, Gui::l_up);
+            return;
+        }
+        if(src == dst)
+        {
+            output = true;
+            type = put_link(buf, x, yy, prev,
+                Gui::l_end_dn | Gui::l_end_mid, Gui::l_end_up | Gui::l_end_dn | Gui::l_end_mid, Gui::l_up);
+            return;
+        }
+        if(!output)
+        {
+            output = true;
+            put_link(buf, x, y + dst * Gui::line_spacing, prev,
+                Gui::l_end_dn, Gui::l_end_up | Gui::l_end_dn, Gui::l_up);
+        }
+        type = put_link(buf, x, yy, prev, 0, Gui::l_br_dn, Gui::l_dn);
+    }
+
+    void finalize(uint32_t last, int32_t level)
+    {
+        if(!output)
+            type = put_link(buf, x, y + dst * Gui::line_spacing, prev,
+                Gui::l_end_dn, Gui::l_end_up | Gui::l_end_dn, Gui::l_up);
+
+        if(prev == size_t(-1))return;
+        if(level)
+        {
+            int yy = y + last * Gui::line_spacing;
+            put_weight(x - Gui::icon_width, yy, -level);
+            put_link(buf, x, yy, prev, 0, Gui::l_beg_dn, Gui::l_dn);
+        }
+        else
+        {
+            buf[prev].tx = Gui::links[type - Gui::l_end_dn].x;
+            buf[prev].ty = Gui::links[type - Gui::l_end_dn].y;
+        }
+    }
+};
+
 void Representation::fill_sel_buf(bool skipUnused)
 {
-    constexpr unsigned num_width = 4 * Gui::digit_width;
-    constexpr unsigned slot_offset = num_width + Gui::icon_width;
+    constexpr unsigned base_offs = 2 * Gui::digit_width + Gui::slot_offset;
 
     sel.proc.process(world.config, sel.cr->genome);
     const auto &slots = sel.proc.slots;
@@ -452,35 +551,36 @@ void Representation::fill_sel_buf(bool skipUnused)
     buf_gui.reserve(22 * slots.size());
 
     sel.mapping.clear();  int y = 0;
+    std::vector<uint32_t> refs(slots.size(), -1);
     for(size_t i = 0; i < slots.size(); i++)
     {
         if(skipUnused && !slots[i].used)continue;
 
-        sel.mapping.push_back(i);
+        refs[i] = sel.mapping.size();  sel.mapping.push_back(i);
         buf_back.emplace_back(y, i, slots[i].used ? Gui::back_used : Gui::back_unused);
-        int x = Gui::line_margin + num_width;  y += Gui::line_margin;
+        int x = base_offs + Gui::slot_offset;  y += Gui::line_margin;
 
         write_number(buf_gui, i, x, y);
         put_icon(buf_gui, x, y, slots[i].type);
         const Gui::TypeIcons &icons = Gui::icons[slots[i].type];
         if(icons.base)
         {
-            write_number(buf_gui, slots[i].base - 1, x += slot_offset, y);
+            write_number(buf_gui, slots[i].base - 1, x += Gui::slot_offset, y);
             put_icon(buf_gui, x, y, icons.base);
         }
         if(icons.angle1)
         {
-            write_number(buf_gui, slots[i].angle1, x += slot_offset, y);
+            write_number(buf_gui, slots[i].angle1, x += Gui::slot_offset, y);
             put_icon(buf_gui, x, y, icons.angle1);
         }
         if(icons.angle2)
         {
-            write_number(buf_gui, slots[i].angle2, x += slot_offset, y);
+            write_number(buf_gui, slots[i].angle2, x += Gui::slot_offset, y);
             put_icon(buf_gui, x, y, icons.angle2);
         }
         if(icons.radius)
         {
-            write_number(buf_gui, slots[i].radius, x += slot_offset, y);
+            write_number(buf_gui, slots[i].radius, x += Gui::slot_offset, y);
             put_icon(buf_gui, x, y, icons.radius);
         }
         if(icons.flag_count)
@@ -492,13 +592,45 @@ void Representation::fill_sel_buf(bool skipUnused)
     }
     buf_back.emplace_back(y, -2, Gui::back_filler);
 
+
+    const auto &links = sel.proc.links;  sel.offsets.clear();
+    for(size_t i = 0; i < slots.size(); i++)
+    {
+        sel.offsets.push_back(buf_gui.size());
+        if(refs[i] == uint32_t(-1) || !slots[i].link_count)continue;
+
+        uint32_t beg = slots[i].link_start;
+        uint32_t end = beg + slots[i].link_count;
+
+        uint32_t cur = links[beg].source;
+        int32_t weight = 0, level = slots[i].act_level;
+        LinkPainter painter(buf_gui, base_offs, Gui::line_margin, refs[i]);
+        for(uint32_t j = beg; j < end; j++)
+        {
+            if(links[j].source != cur)
+            {
+                uint32_t src = refs[cur];
+                if(src != uint32_t(-1))painter.process(src, weight);
+                else if(slots[cur].neiro_state == GenomeProcessor::s_always_on)level -= 255 * weight;
+                cur = links[j].source;
+            }
+            weight += links[j].weight;
+        }
+        uint32_t src = refs[cur];
+        if(src != uint32_t(-1))painter.process(src, weight);
+        else if(slots[cur].neiro_state == GenomeProcessor::s_always_on)level -= 255 * weight;
+        painter.finalize(sel.mapping.size(), level);
+    }
+    sel.offsets.push_back(buf_gui.size());
+
+
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_back]);
     glBufferData(GL_ARRAY_BUFFER, buf_back.size() * sizeof(GuiQuad), buf_back.data(), GL_STATIC_DRAW);
     obj_count[pass_back] = buf_back.size();
 
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_gui]);
     glBufferData(GL_ARRAY_BUFFER, buf_gui.size() * sizeof(GuiQuad), buf_gui.data(), GL_STATIC_DRAW);
-    obj_count[pass_gui] = buf_gui.size();
+    obj_count[pass_gui] = sel.offsets[0];
 }
 
 bool hit_test(const World::Tile &tile,
@@ -665,4 +797,8 @@ void Representation::draw()
     glUniform4f(i_transform[pass_gui], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
     glUniform1i(i_gui, 0);  glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_gui);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_gui], obj_count[pass_gui]);
+
+    if(sel.slot >= 0)
+        glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, elem_count[pass_gui],
+            sel.offsets[sel.slot + 1] - sel.offsets[sel.slot], sel.offsets[sel.slot]);
 }
