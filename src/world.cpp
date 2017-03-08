@@ -503,7 +503,7 @@ void GenomeProcessor::State::process_gene(const Config &config, Genome::Gene &ge
 
 void GenomeProcessor::update(const Config &config, const Genome &genome)
 {
-    slot_count = uint32_t(1) << config.slot_bits;  working_links = 0;
+    uint32_t slot_count = uint32_t(1) << config.slot_bits;
     slots.resize(slot_count);  links.clear();
 
     std::vector<Genome::Gene> genes = genome.genes;
@@ -542,9 +542,9 @@ struct Reference
 
 void GenomeProcessor::finalize()
 {
-    std::vector<uint32_t> queue;  queue.reserve(slot_count);
+    std::vector<uint32_t> queue;  queue.reserve(slots.size());
     std::vector<Reference> refs;  refs.reserve(links.size() + 1);
-    for(uint32_t i = 0; i < slot_count; i++)
+    for(size_t i = 0; i < slots.size(); i++)
     {
         if(slots[i].neiro_state)
         {
@@ -563,12 +563,12 @@ void GenomeProcessor::finalize()
         while(pos < end)refs.emplace_back(i, links[pos++]);
     }
     std::sort(refs.begin(), refs.end());
-    refs.emplace_back(slot_count);
+    refs.emplace_back(slots.size());
 
     std::vector<uint32_t> ref_pos;
-    ref_pos.reserve(slot_count + 1);
+    ref_pos.reserve(slots.size() + 1);
     ref_pos.push_back(0);  uint32_t pos = 0;
-    for(uint32_t i = 0; i < slot_count; i++)
+    for(size_t i = 0; i < slots.size(); i++)
     {
         while(refs[pos].source == i)pos++;
         ref_pos.push_back(pos);
@@ -602,7 +602,7 @@ void GenomeProcessor::finalize()
         }
     }
 
-    for(uint32_t i = 0; i < slot_count; i++)if(slots[i].used)
+    for(size_t i = 0; i < slots.size(); i++)if(slots[i].used)
     {
         if(!slots[i].neiro_state)queue.push_back(i);
         else if(slots[i].neiro_state == s_always_off)slots[i].used = false;
@@ -770,8 +770,8 @@ Creature::Creature(const Config &config, Genome &genome, GenomeProcessor &proc,
     radars.reserve(update_counters(proc.count, offset, n, Slot::radar));
     std::vector<slot_t> slots(n);  input.resize(n, 0);
 
-    std::vector<uint32_t> mapping(proc.slot_count, -1);
-    for(uint32_t i = 0; i < proc.slot_count; i++)
+    std::vector<uint32_t> mapping(proc.slots.size(), -1);
+    for(size_t i = 0; i < proc.slots.size(); i++)
     {
         const auto &slot = proc.slots[i];  if(!slot.used)continue;
 

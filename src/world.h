@@ -231,7 +231,7 @@ private:
 
 
 public:
-    uint32_t slot_count, working_links;
+    uint32_t working_links;
     std::vector<SlotData> slots;
     std::vector<LinkData> links;
     Config::SlotCost passive_cost;

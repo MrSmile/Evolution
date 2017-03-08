@@ -45,14 +45,14 @@ class Representation
 {
     enum Pass
     {
-        pass_food, pass_creature, pass_gui, pass_count
+        pass_food, pass_creature, pass_back, pass_gui, pass_count
     };
 
     enum BufferType
     {
         vtx_food, inst_food, idx_food,
         vtx_creature, inst_creature, idx_creature,
-        vtx_gui, inst_gui,
+        vtx_quad, inst_back, inst_gui,
         buf_count
     };
 
@@ -62,18 +62,16 @@ class Representation
         const Creature *cr;
         GenomeProcessor proc;
         std::vector<uint32_t> mapping;
-        Position pos;
+        Position pos;  int slot;
 
         Selection() : id(-1), cr(nullptr)
         {
         }
-
-        size_t make_creature(const World &world, bool skipUnused);
     };
 
 
     GLuint prog[pass_count], tex_gui;
-    GLint i_transform[pass_count], i_gui;
+    GLint i_transform[pass_count], i_size, i_gui;
     GLuint arr[pass_count], buf[buf_count];
     size_t elem_count[pass_count];
     size_t obj_count[pass_count];
@@ -81,6 +79,7 @@ class Representation
 
 
     void create_program(Pass pass, Shader::Index id);
+    void fill_sel_buf(const World &world, bool skipUnused);
 
     void make_food_shape();
     void make_creature_shape();
