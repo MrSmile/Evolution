@@ -68,48 +68,54 @@ bool main_loop(SDL_Window *window, char **args, int n)
     World world;
     if(n <= 1)world.init();
     else if(!load_restart(world, args[1]))return false;
-    Camera cam(window);  Representation graph;
-    graph.update(window, world, cam, true);
+    Representation graph(world, window);
+    graph.update(window, true);
 
     if(!check_gl_error())return false;
 
-    bool play = false;
+    bool update = true, play = false;
     for(SDL_Event evt;;)
     {
-        if(!SDL_PollEvent(&evt))
+        if(!update)SDL_WaitEvent(&evt);
+        else if(!SDL_PollEvent(&evt))
         {
             if(play)
             {
-                world.next_step();  graph.update(window, world, cam, false);
+                world.next_step();  graph.update(window, false);
             }
-            graph.draw(world, cam);  if(!check_gl_error())return false;
-            SDL_GL_SwapWindow(window);  continue;
+            graph.draw();  if(!check_gl_error())return false;
+            SDL_GL_SwapWindow(window);  update = play;  continue;
         }
         switch(evt.type)
         {
         case SDL_MOUSEBUTTONDOWN:
-            if(evt.button.button != SDL_BUTTON_RIGHT)continue;
-            graph.select(world, cam, evt.button.x, evt.button.y);  break;
+            if(graph.mouse_down(evt.button.x, evt.button.y, evt.button.button))break;
+            continue;
 
         case SDL_MOUSEMOTION:
-            if(!(evt.motion.state & SDL_BUTTON_LMASK))continue;
-            cam.move(evt.motion.xrel, evt.motion.yrel);  break;
+            if(graph.mouse_move(evt.motion.xrel, evt.motion.yrel))break;
+            continue;
+
+        case SDL_MOUSEBUTTONUP:
+            if(graph.mouse_up(evt.button.button))break;
+            continue;
 
         case SDL_MOUSEWHEEL:
-            cam.rescale(evt.wheel.y);  break;
+            if(graph.mouse_wheel(evt.wheel.y))break;
+            continue;
 
         case SDL_WINDOWEVENT:
             if(evt.window.event != SDL_WINDOWEVENT_RESIZED)continue;
-            cam.resize(evt.window.data1, evt.window.data2);  break;
+            graph.resize(evt.window.data1, evt.window.data2);  break;
 
         case SDL_KEYDOWN:
             switch(evt.key.keysym.sym)
             {
             case SDLK_SPACE:
-                play = !play;  break;
+                update = play = !play;  continue;
 
             case SDLK_RIGHT:
-                world.next_step();  graph.update(window, world, cam, true);
+                world.next_step();  graph.update(window, true);
                 play = false;  break;
 
             case SDLK_F5:
@@ -126,6 +132,7 @@ bool main_loop(SDL_Window *window, char **args, int n)
         default:
             continue;
         }
+        update = true;
     }
 }
 
@@ -151,7 +158,7 @@ int init(char **args, int n)
     if(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1) || SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4))
         return sdl_error("Failed to enable multisampling: ");
 
-    const int width = 800, height = 600;
+    const int width = 1280, height = 720;
     SDL_Window *window = SDL_CreateWindow("Evolution",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width, height,
         SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);

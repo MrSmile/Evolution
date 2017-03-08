@@ -9,6 +9,58 @@
 
 
 
+namespace Gui
+{
+    constexpr uint32_t back_used   = 0xDD000000;
+    constexpr uint32_t back_unused = 0xDD330000;
+    constexpr uint32_t back_filler = 0xDD000000;
+
+    constexpr int digit_width  =  8;
+    constexpr int icon_width   = 16;
+    constexpr int line_height  = 16;
+    constexpr int line_margin  =  4;
+    constexpr int flag_pos     = 16;
+    constexpr int flag_width   =  8;
+    constexpr int flag_height  =  8;
+
+    constexpr unsigned icon_offset  = 16;
+    constexpr unsigned icon_row     =  8;
+    constexpr unsigned flag_row     =  3;
+    constexpr unsigned end_flag = 1 << 7;
+
+    constexpr int line_spacing = line_height + 2 * line_margin;
+    constexpr int panel_width = 5 * icon_width + 20 * digit_width + 2 * line_margin;
+
+    enum Icon
+    {
+        i_weight = Slot::invalid + 1, i_target, i_volume,
+        i_angle, i_radius, i_damage, i_life, i_speed, i_none = 0
+    };
+
+    struct TypeIcons
+    {
+        Icon base, angle1, angle2, radius;
+        uint8_t flag_count;
+    };
+
+    const TypeIcons icons[Slot::invalid + 1] =
+    {
+        {i_none,   i_none,  i_none,  i_none,   0},  // neiron
+        {i_none,   i_none,  i_none,  i_none,   0},  // mouth
+        {i_volume, i_none,  i_none,  i_none,   0},  // stomach
+        {i_volume, i_none,  i_none,  i_none,   0},  // womb
+        {i_none,   i_angle, i_angle, i_radius, 6},  // eye
+        {i_none,   i_angle, i_angle, i_none,   6},  // radar
+        {i_damage, i_angle, i_angle, i_radius, 0},  // claw
+        {i_life,   i_none,  i_none,  i_none,   0},  // hide
+        {i_speed,  i_angle, i_none,  i_none,   0},  // leg
+        {i_none,   i_none,  i_angle, i_none,   0},  // rotator
+        {i_none,   i_none,  i_none,  i_none,   3},  // signal
+        {i_none,   i_none,  i_none,  i_none,   0},  // invalid
+    };
+}
+
+
 void print_checksum(const World &world, const OutStream &stream)
 {
     const uint32_t *checksum = static_cast<const uint32_t *>(stream.checksum());
@@ -27,29 +79,23 @@ void Camera::update_scale()
     scale = std::exp2(tile_order - scale_step * log_scale);
 }
 
-Camera::Camera(SDL_Window *window) : x(0), y(0), log_scale(8 / scale_step)
+Camera::Camera(SDL_Window *window) : log_scale(8 / scale_step), x(0), y(0)
 {
     SDL_GetWindowSize(window, &width, &height);  update_scale();
 }
 
-void Camera::apply() const
-{
-    glViewport(0, 0, width, height);
-}
-
-
-void Camera::resize(int w, int h)
+void Camera::resize(int32_t w, int32_t h)
 {
     width = w;  height = h;
 }
 
-void Camera::move(int dx, int dy)
+void Camera::move(int32_t dx, int32_t dy)
 {
     x -= std::lround(dx * scale);
     y -= std::lround(dy * scale);
 }
 
-void Camera::rescale(int delta)
+void Camera::rescale(int32_t delta)
 {
     log_scale += delta;
     //if(log_scale < min_scale)log_scale = min_scale;
@@ -224,7 +270,7 @@ void Representation::make_creature_shape()
 void Representation::make_quad_shape()
 {
     elem_count[pass_back] = elem_count[pass_gui] = 4;
-    obj_count[pass_back] = obj_count[pass_gui] = 0;
+    obj_count[pass_back] = 1;  obj_count[pass_gui] = 0;
 
     Vertex vertex[4] =
     {
@@ -233,6 +279,10 @@ void Representation::make_quad_shape()
 
     glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_quad]);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
+
+    GuiBack filler(0, -2, Gui::back_filler);
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_back]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(GuiQuad), &filler, GL_STATIC_DRAW);
 }
 
 
@@ -242,7 +292,7 @@ void register_attribute(GLuint index, int vec_size, GLenum type, GLboolean norm,
     glVertexAttribPointer(index, vec_size, type, norm, stride, reinterpret_cast<void *>(offs));
 }
 
-Representation::Representation()
+Representation::Representation(const World &world, SDL_Window *window) : world(world), cam(window), move(false)
 {
     create_program(pass_food, Shader::food);
     i_transform[pass_food] = glGetUniformLocation(prog[pass_food], "transform");
@@ -313,56 +363,46 @@ Representation::~Representation()
 }
 
 
-namespace Gui
+void Representation::resize(int32_t w, int32_t h)
 {
-    constexpr uint32_t back_used   = 0xDD000000;
-    constexpr uint32_t back_unused = 0xDD330000;
-    constexpr uint32_t back_filler = 0xDD000000;
-
-    constexpr unsigned digit_width  =  8;
-    constexpr unsigned icon_width   = 16;
-    constexpr unsigned line_height  = 16;
-    constexpr unsigned line_margin  =  4;
-
-    constexpr unsigned flag_pos     = 16;
-    constexpr unsigned flag_width   =  8;
-    constexpr unsigned flag_height  =  8;
-    constexpr unsigned flag_row     =  3;
-    constexpr unsigned end_flag = 1 << 7;
-
-    constexpr unsigned panel_width = 5 * icon_width + 20 * digit_width + 2 * line_margin;
-
-    constexpr unsigned icon_offset  = 16;
-    constexpr unsigned icon_row     =  8;
-
-    enum Icon
-    {
-        i_weight = Slot::invalid + 1, i_target, i_volume,
-        i_angle, i_radius, i_damage, i_life, i_speed, i_none = 0
-    };
-
-    struct TypeIcons
-    {
-        Icon base, angle1, angle2, radius;
-        uint8_t flag_count;
-    };
-
-    const TypeIcons icons[Slot::invalid + 1] =
-    {
-        {i_none,   i_none,  i_none,  i_none,   0},  // neiron
-        {i_none,   i_none,  i_none,  i_none,   0},  // mouth
-        {i_volume, i_none,  i_none,  i_none,   0},  // stomach
-        {i_volume, i_none,  i_none,  i_none,   0},  // womb
-        {i_none,   i_angle, i_angle, i_radius, 6},  // eye
-        {i_none,   i_angle, i_angle, i_none,   6},  // radar
-        {i_damage, i_angle, i_angle, i_radius, 0},  // claw
-        {i_life,   i_none,  i_none,  i_none,   0},  // hide
-        {i_speed,  i_angle, i_none,  i_none,   0},  // leg
-        {i_none,   i_none,  i_angle, i_none,   0},  // rotator
-        {i_none,   i_none,  i_none,  i_none,   3},  // signal
-        {i_none,   i_none,  i_none,  i_none,   0},  // invalid
-    };
+    cam.resize(w, h);
 }
+
+bool Representation::mouse_wheel(int32_t delta)
+{
+    cam.rescale(delta);  return true;
+}
+
+bool Representation::mouse_down(int32_t x, int32_t y, uint8_t button)
+{
+    if(x >= cam.width - Gui::panel_width)
+    {
+        if(y < 0)return false;
+
+        uint32_t pos = y / Gui::line_spacing;
+        int slot = pos < sel.mapping.size() ? sel.mapping[pos] : -1;
+        if(sel.slot == slot)return false;
+        sel.slot = slot;  return true;
+    }
+
+    switch(button)
+    {
+    case SDL_BUTTON_LEFT:  move = true;  return false;
+    case SDL_BUTTON_RIGHT:  return select(x, y);
+    default:  return false;
+    }
+}
+
+bool Representation::mouse_move(int32_t dx, int32_t dy)
+{
+    if(!move)return false;  cam.move(dx, dy);  return true;
+}
+
+bool Representation::mouse_up(uint8_t button)
+{
+    if(button == SDL_BUTTON_LEFT)move = false;  return false;
+}
+
 
 int write_number(std::vector<GuiQuad> &buf, uint32_t num, int x, int y)
 {
@@ -397,7 +437,7 @@ void put_flags(std::vector<GuiQuad> &buf, int x, int y, unsigned flags, unsigned
     }
 }
 
-void Representation::fill_sel_buf(const World &world, bool skipUnused)
+void Representation::fill_sel_buf(bool skipUnused)
 {
     constexpr unsigned num_width = 4 * Gui::digit_width;
     constexpr unsigned slot_offset = num_width + Gui::icon_width;
@@ -411,11 +451,12 @@ void Representation::fill_sel_buf(const World &world, bool skipUnused)
     std::vector<GuiQuad> buf_gui;
     buf_gui.reserve(22 * slots.size());
 
-    int y = 0;
+    sel.mapping.clear();  int y = 0;
     for(size_t i = 0; i < slots.size(); i++)
     {
         if(skipUnused && !slots[i].used)continue;
 
+        sel.mapping.push_back(i);
         buf_back.emplace_back(y, i, slots[i].used ? Gui::back_used : Gui::back_unused);
         int x = Gui::line_margin + num_width;  y += Gui::line_margin;
 
@@ -447,7 +488,7 @@ void Representation::fill_sel_buf(const World &world, bool skipUnused)
             x += Gui::icon_width + Gui::flag_width;
             put_flags(buf_gui, x, y, slots[i].flags, icons.flag_count);
         }
-        y += Gui::line_height + Gui::line_margin;
+        y += Gui::line_spacing - Gui::line_margin;
     }
     buf_back.emplace_back(y, -2, Gui::back_filler);
 
@@ -491,7 +532,7 @@ const Creature *hit_test(const World &world, uint64_t x0, uint64_t y0, uint32_t 
     return sel;
 }
 
-void Representation::select(const World &world, Camera &cam, int32_t x, int32_t y)
+bool Representation::select(int32_t x, int32_t y)
 {
     constexpr int click_zone = 8;
 
@@ -501,6 +542,8 @@ void Representation::select(const World &world, Camera &cam, int32_t x, int32_t 
     sel.cr = hit_test(world, x0, y0, rad, sel.id);
     if(!sel.cr)
     {
+        if(sel.id == uint64_t(-1))return false;
+
         GuiBack filler(0, -2, Gui::back_filler);
         glBindBuffer(GL_ARRAY_BUFFER, buf[inst_back]);
         glBufferData(GL_ARRAY_BUFFER, sizeof(GuiQuad), &filler, GL_STATIC_DRAW);
@@ -510,15 +553,15 @@ void Representation::select(const World &world, Camera &cam, int32_t x, int32_t 
         glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STATIC_DRAW);
         obj_count[pass_gui] = 0;
 
-        sel.id = uint64_t(-1);  return;
+        sel.id = uint64_t(-1);  return true;
     }
-    if(sel.cr->id == sel.id)return;
+    if(sel.cr->id == sel.id)return false;
 
     sel.id = sel.cr->id;  sel.pos = sel.cr->pos;  sel.slot = -1;
-    fill_sel_buf(world, true);
+    fill_sel_buf(true);  return true;
 }
 
-void Representation::update(SDL_Window *window, const World &world, Camera &cam, bool checksum)
+void Representation::update(SDL_Window *window, bool checksum)
 {
     obj_count[pass_food] = world.total_food_count;
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_ptr = nullptr;
@@ -581,9 +624,9 @@ void Representation::update(SDL_Window *window, const World &world, Camera &cam,
     SDL_SetWindowTitle(window, buf);
 }
 
-void Representation::draw(const World &world, const Camera &cam)
+void Representation::draw()
 {
-    cam.apply();
+    glViewport(0, 0, cam.width, cam.height);
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT);
     glDisable(GL_BLEND);
@@ -615,7 +658,7 @@ void Representation::draw(const World &world, const Camera &cam)
 
     glBindVertexArray(arr[pass_back]);  glUseProgram(prog[pass_back]);
     glUniform4f(i_transform[pass_back], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
-    glUniform3f(i_size, Gui::panel_width, Gui::line_height + 2 * Gui::line_margin, sel.slot);
+    glUniform3f(i_size, Gui::panel_width, Gui::line_spacing, sel.slot);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_back], obj_count[pass_back]);
 
     glBindVertexArray(arr[pass_gui]);  glUseProgram(prog[pass_gui]);

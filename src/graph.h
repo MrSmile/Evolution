@@ -22,20 +22,18 @@ struct Camera
     static constexpr int max_scale = +32 * 4;
 
 
-    int width, height;
+    int32_t width, height;
+    int32_t log_scale;
     uint64_t x, y;
-    int log_scale;
     double scale;
 
 
     void update_scale();
 
     Camera(SDL_Window *window);
-    void apply() const;
-
-    void resize(int w, int h);
-    void move(int dx, int dy);
-    void rescale(int delta);
+    void resize(int32_t w, int32_t h);
+    void move(int32_t dx, int32_t dy);
+    void rescale(int32_t delta);
 };
 
 
@@ -69,7 +67,8 @@ class Representation
         }
     };
 
-
+    const World &world;
+    Camera cam;  bool move;
     GLuint prog[pass_count], tex_gui;
     GLint i_transform[pass_count], i_size, i_gui;
     GLuint arr[pass_count], buf[buf_count];
@@ -79,17 +78,23 @@ class Representation
 
 
     void create_program(Pass pass, Shader::Index id);
-    void fill_sel_buf(const World &world, bool skipUnused);
+    void fill_sel_buf(bool skipUnused);
 
     void make_food_shape();
     void make_creature_shape();
     void make_quad_shape();
 
 public:
-    Representation();
+    explicit Representation(const World &world, SDL_Window *window);
     ~Representation();
 
-    void select(const World &world, Camera &cam, int32_t x, int32_t y);
-    void update(SDL_Window *window, const World &world, Camera &cam, bool checksum);
-    void draw(const World &world, const Camera &cam);
+    void resize(int32_t w, int32_t h);
+    bool mouse_wheel(int32_t delta);
+    bool mouse_down(int32_t x, int32_t y, uint8_t button);
+    bool mouse_move(int32_t dx, int32_t dy);
+    bool mouse_up(uint8_t button);
+
+    bool select(int32_t x, int32_t y);
+    void update(SDL_Window *window, bool checksum);
+    void draw();
 };
