@@ -30,6 +30,7 @@ namespace Gui
 
     constexpr int line_spacing = line_height + 2 * line_margin;
     constexpr unsigned slot_offset = 4 * digit_width + icon_width;
+    constexpr unsigned base_offs = 2 * digit_width + slot_offset;
     constexpr int panel_width = 6 * slot_offset + 2 * digit_width + 2 * line_margin;
 
     enum Icon
@@ -208,6 +209,87 @@ struct GuiQuad
 };
 
 
+enum AttributeFlags
+{
+    f_integer   = 1 << 0,
+    f_normalize = 1 << 1,
+    f_instance  = 1 << 2
+};
+
+struct VertexAttribute
+{
+    GLint size;
+    GLenum type;
+    uint32_t stride, offset;
+    int flags;
+
+    VertexAttribute(uint32_t stride, uint32_t offset, GLint size, GLenum type, int flags) :
+        size(size), type(type), stride(stride), offset(offset), flags(flags)
+    {
+    }
+};
+
+void register_attributes(const VertexAttribute *attr, int attr_count, GLuint buf_base, GLuint buf_inst)
+{
+    for(int i = 0; i < attr_count; i++)
+    {
+        glEnableVertexAttribArray(i);
+        glBindBuffer(GL_ARRAY_BUFFER, attr[i].flags & f_instance ? buf_inst : buf_base);
+        if(attr[i].flags & f_integer)glVertexAttribIPointer(i, attr[i].size, attr[i].type,
+            attr[i].stride, reinterpret_cast<void *>(attr[i].offset));
+        else glVertexAttribPointer(i, attr[i].size, attr[i].type,
+            attr[i].flags & f_normalize ? GL_TRUE : GL_FALSE,
+            attr[i].stride, reinterpret_cast<void *>(attr[i].offset));
+        if(attr[i].flags & f_instance)glVertexAttribDivisor(i, 1);
+    }
+}
+
+#define ATTR(data_type, member, size, type, flags) \
+    VertexAttribute(sizeof(data_type), offsetof(data_type, member), size, type, flags)
+
+const VertexAttribute layout_food[] =
+{
+    ATTR(Vertex,       x,     2,       GL_FLOAT,          0),
+    ATTR(FoodData,     x,     4,       GL_FLOAT,          f_instance),
+};
+const VertexAttribute layout_creature[] =
+{
+    ATTR(Vertex,       x,     2,       GL_FLOAT,          0),
+    ATTR(CreatureData, x,     2,       GL_FLOAT,          f_instance),
+    ATTR(CreatureData, rad,   3,       GL_FLOAT,          f_instance),
+    ATTR(CreatureData, angle, 4,       GL_UNSIGNED_BYTE,  f_instance | f_normalize),
+};
+const VertexAttribute layout_back[] =
+{
+    ATTR(Vertex,       x,     2,       GL_FLOAT,          0),
+    ATTR(GuiBack,      pos,   2,       GL_SHORT,          f_instance),
+    ATTR(GuiBack,      color, GL_BGRA, GL_UNSIGNED_BYTE,  f_instance | f_normalize),
+};
+const VertexAttribute layout_gui[] =
+{
+    ATTR(Vertex,       x,     2,       GL_FLOAT,          0),
+    ATTR(GuiQuad,      x,     2,       GL_SHORT,          f_instance),
+    ATTR(GuiQuad,      tx,    4,       GL_UNSIGNED_SHORT, f_instance),
+};
+
+#undef ATTR
+
+#define INFO(name, base, inst, index) \
+    {Representation::prog_##name, sizeof(layout_##name) / sizeof(VertexAttribute), \
+        layout_##name, Representation::base, Representation::inst, Representation::index}
+
+const Representation::PassInfo Representation::pass_info[] =
+{
+    INFO(food,     vtx_food,     inst_food,     idx_food),
+    INFO(creature, vtx_creature, inst_creature, idx_creature),
+    INFO(back,     vtx_quad,     inst_back,     buf_count),
+    INFO(gui,      vtx_quad,     inst_gui,      buf_count),
+    INFO(gui,      vtx_quad,     inst_link,     buf_count),
+};
+
+#undef INFO
+
+
 GLuint load_shader(GLint type, const char *name, const char *data, GLint size)
 {
     GLuint shader = glCreateShader(type);
@@ -218,19 +300,19 @@ GLuint load_shader(GLint type, const char *name, const char *data, GLint size)
     if(len)std::printf("%s shader log:\n%s\n", name, msg);  return shader;
 }
 
-void Representation::create_program(Pass pass, Shader::Index id)
+GLuint create_program(Shader::Index id)
 {
-    prog[pass] = glCreateProgram();  const ShaderDesc &shader = shaders[id];
+    GLuint prog = glCreateProgram();  const ShaderDesc &shader = shaders[id];
     GLuint vert = load_shader(GL_VERTEX_SHADER, "Vertex", shader.vert_src, shader.vert_len);
     GLuint frag = load_shader(GL_FRAGMENT_SHADER, "Fragment", shader.frag_src, shader.frag_len);
-    glAttachShader(prog[pass], vert);  glAttachShader(prog[pass], frag);
+    glAttachShader(prog, vert);  glAttachShader(prog, frag);
 
     char msg[65536];  GLsizei len;
-    glLinkProgram(prog[pass]);  glGetProgramInfoLog(prog[pass], sizeof(msg), &len, msg);
+    glLinkProgram(prog);  glGetProgramInfoLog(prog, sizeof(msg), &len, msg);
     if(len)std::printf("Shader program \"%s\" log:\n%s\n", shader.name, msg);
 
-    glDetachShader(prog[pass], vert);  glDetachShader(prog[pass], frag);
-    glDeleteShader(vert);  glDeleteShader(frag);
+    glDetachShader(prog, vert);  glDetachShader(prog, frag);
+    glDeleteShader(vert);  glDeleteShader(frag);  return prog;
 }
 
 
@@ -290,8 +372,7 @@ void Representation::make_creature_shape()
 
 void Representation::make_quad_shape()
 {
-    elem_count[pass_back] = elem_count[pass_gui] = 4;
-    obj_count[pass_back] = 1;  obj_count[pass_gui] = 0;
+    elem_count[pass_back] = elem_count[pass_gui] = elem_count[pass_link] = 4;
 
     Vertex vertex[4] =
     {
@@ -301,69 +382,37 @@ void Representation::make_quad_shape()
     glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_quad]);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
 
-    GuiBack filler(0, -2, Gui::back_filler);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_back]);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(GuiQuad), &filler, GL_STATIC_DRAW);
-}
-
-
-void register_attribute(GLuint index, int vec_size, GLenum type, GLboolean norm, size_t stride, size_t offs)
-{
-    glEnableVertexAttribArray(index);  if(index)glVertexAttribDivisor(index, 1);
-    glVertexAttribPointer(index, vec_size, type, norm, stride, reinterpret_cast<void *>(offs));
+    sel.fill_sel_bufs(buf[inst_back], buf[inst_gui], obj_count[pass_back], obj_count[pass_gui]);
+    sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
 }
 
 Representation::Representation(const World &world, SDL_Window *window) : world(world), cam(window), move(false)
 {
-    create_program(pass_food, Shader::food);
-    i_transform[pass_food] = glGetUniformLocation(prog[pass_food], "transform");
+    prog[prog_food] = create_program(Shader::food);
+    i_transform[prog_food] = glGetUniformLocation(prog[prog_food], "transform");
 
-    create_program(pass_creature, Shader::creature);
-    i_transform[pass_creature] = glGetUniformLocation(prog[pass_creature], "transform");
+    prog[prog_creature] = create_program(Shader::creature);
+    i_transform[prog_creature] = glGetUniformLocation(prog[prog_creature], "transform");
 
-    create_program(pass_back, Shader::back);
-    i_transform[pass_back] = glGetUniformLocation(prog[pass_back], "transform");
-    i_size = glGetUniformLocation(prog[pass_back], "size");
+    prog[prog_back] = create_program(Shader::back);
+    i_transform[prog_back] = glGetUniformLocation(prog[prog_back], "transform");
+    i_size = glGetUniformLocation(prog[prog_back], "size");
 
-    create_program(pass_gui, Shader::gui);
-    i_transform[pass_gui] = glGetUniformLocation(prog[pass_gui], "transform");
-    i_gui = glGetUniformLocation(prog[pass_gui], "gui");
+    prog[prog_gui] = create_program(Shader::gui);
+    i_transform[prog_gui] = glGetUniformLocation(prog[prog_gui], "transform");
+    i_gui = glGetUniformLocation(prog[prog_gui], "gui");
 
 
     glGenVertexArrays(pass_count, arr);
     glGenBuffers(buf_count, buf);
     glGenTextures(1, &tex_gui);
 
-    glBindVertexArray(arr[pass_food]);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_food]);
-    register_attribute(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), 0);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);
-    register_attribute(1, 4, GL_FLOAT, GL_FALSE, sizeof(FoodData), 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_food]);
-
-    glBindVertexArray(arr[pass_creature]);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_creature]);
-    register_attribute(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), 0);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
-    register_attribute(1, 2, GL_FLOAT, GL_FALSE, sizeof(CreatureData), 0);
-    register_attribute(2, 3, GL_FLOAT, GL_FALSE, sizeof(CreatureData), 2 * sizeof(GLfloat));
-    register_attribute(3, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(CreatureData), 5 * sizeof(GLfloat));
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_creature]);
-
-    glBindVertexArray(arr[pass_back]);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_quad]);
-    register_attribute(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), 0);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_back]);
-    register_attribute(1, 2, GL_SHORT, GL_FALSE, sizeof(GuiBack), 0);
-    register_attribute(2, GL_BGRA, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(GuiBack), 2 * sizeof(GLshort));
-
-    glBindVertexArray(arr[pass_gui]);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_quad]);
-    register_attribute(0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), 0);
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_gui]);
-    register_attribute(1, 2, GL_SHORT, GL_FALSE, sizeof(GuiQuad), 0);
-    register_attribute(2, 4, GL_UNSIGNED_SHORT, GL_FALSE, sizeof(GuiQuad), 2 * sizeof(GLshort));
-
+    for(int pass = 0; pass < pass_count; pass++)
+    {
+        glBindVertexArray(arr[pass]);  auto &info = pass_info[pass];
+        register_attributes(info.attr, info.attr_count, buf[info.base], buf[info.inst]);
+        if(info.index < buf_count)glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[info.index]);
+    }
     glBindVertexArray(0);
 
     glBindTexture(GL_TEXTURE_2D, tex_gui);  const ImageDesc &image = images[Image::gui];
@@ -378,7 +427,7 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
 
 Representation::~Representation()
 {
-    for(int pass = 0; pass < pass_count; pass++)glDeleteProgram(prog[pass]);
+    for(int i = 0; i < prog_count; i++)glDeleteProgram(prog[i]);
     glDeleteVertexArrays(pass_count, arr);  glDeleteBuffers(buf_count, buf);
     glDeleteTextures(1, &tex_gui);
 }
@@ -403,7 +452,10 @@ bool Representation::mouse_down(int32_t x, int32_t y, uint8_t button)
         uint32_t pos = y / Gui::line_spacing;
         int slot = pos < sel.mapping.size() ? sel.mapping[pos] : -1;
         if(sel.slot == slot)return false;
-        sel.slot = slot;  return true;
+
+        sel.slot = slot;
+        sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
+        return true;
     }
 
     switch(button)
@@ -537,101 +589,115 @@ struct LinkPainter
     }
 };
 
-void Representation::fill_sel_buf(bool skipUnused)
+void Representation::Selection::fill_sel_bufs(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui)
 {
-    constexpr unsigned base_offs = 2 * Gui::digit_width + Gui::slot_offset;
+    if(id == uint64_t(-1))
+    {
+        GuiBack filler(0, -2, Gui::back_filler);
+        glBindBuffer(GL_ARRAY_BUFFER, buf_back);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(GuiBack), &filler, GL_DYNAMIC_DRAW);
+        size_back = 1;
 
-    sel.proc.process(world.config, sel.cr->genome);
-    const auto &slots = sel.proc.slots;
+        glBindBuffer(GL_ARRAY_BUFFER, buf_gui);
+        glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+        size_gui = 0;  return;
+    }
 
-    std::vector<GuiBack> buf_back;
-    buf_back.reserve(slots.size() + 1);
+    std::vector<GuiBack> data_back;
+    const auto &slots = proc.slots;
+    data_back.reserve(slots.size() + 1);
 
-    std::vector<GuiQuad> buf_gui;
-    buf_gui.reserve(22 * slots.size());
+    std::vector<GuiQuad> data_gui;
+    data_gui.reserve(22 * slots.size());
 
-    sel.mapping.clear();  int y = 0;
-    std::vector<uint32_t> refs(slots.size(), -1);
+    mapping.clear();  int y = 0;
+    refs.clear();  refs.resize(slots.size(), -1);
     for(size_t i = 0; i < slots.size(); i++)
     {
-        if(skipUnused && !slots[i].used)continue;
+        if(skip_unused && !slots[i].used)continue;
 
-        refs[i] = sel.mapping.size();  sel.mapping.push_back(i);
-        buf_back.emplace_back(y, i, slots[i].used ? Gui::back_used : Gui::back_unused);
-        int x = base_offs + Gui::slot_offset;  y += Gui::line_margin;
+        refs[i] = mapping.size();  mapping.push_back(i);
+        data_back.emplace_back(y, i, slots[i].used ? Gui::back_used : Gui::back_unused);
+        int x = Gui::base_offs + Gui::slot_offset;  y += Gui::line_margin;
 
-        write_number(buf_gui, i, x, y);
-        put_icon(buf_gui, x, y, slots[i].type);
+        write_number(data_gui, i, x, y);
+        put_icon(data_gui, x, y, slots[i].type);
         const Gui::TypeIcons &icons = Gui::icons[slots[i].type];
         if(icons.base)
         {
-            write_number(buf_gui, slots[i].base - 1, x += Gui::slot_offset, y);
-            put_icon(buf_gui, x, y, icons.base);
+            write_number(data_gui, slots[i].base - 1, x += Gui::slot_offset, y);
+            put_icon(data_gui, x, y, icons.base);
         }
         if(icons.angle1)
         {
-            write_number(buf_gui, slots[i].angle1, x += Gui::slot_offset, y);
-            put_icon(buf_gui, x, y, icons.angle1);
+            write_number(data_gui, slots[i].angle1, x += Gui::slot_offset, y);
+            put_icon(data_gui, x, y, icons.angle1);
         }
         if(icons.angle2)
         {
-            write_number(buf_gui, slots[i].angle2, x += Gui::slot_offset, y);
-            put_icon(buf_gui, x, y, icons.angle2);
+            write_number(data_gui, slots[i].angle2, x += Gui::slot_offset, y);
+            put_icon(data_gui, x, y, icons.angle2);
         }
         if(icons.radius)
         {
-            write_number(buf_gui, slots[i].radius, x += Gui::slot_offset, y);
-            put_icon(buf_gui, x, y, icons.radius);
+            write_number(data_gui, slots[i].radius, x += Gui::slot_offset, y);
+            put_icon(data_gui, x, y, icons.radius);
         }
         if(icons.flag_count)
         {
             x += Gui::icon_width + Gui::flag_width;
-            put_flags(buf_gui, x, y, slots[i].flags, icons.flag_count);
+            put_flags(data_gui, x, y, slots[i].flags, icons.flag_count);
         }
         y += Gui::line_spacing - Gui::line_margin;
     }
-    buf_back.emplace_back(y, -2, Gui::back_filler);
+    data_back.emplace_back(y, -2, Gui::back_filler);
 
+    glBindBuffer(GL_ARRAY_BUFFER, buf_back);
+    glBufferData(GL_ARRAY_BUFFER, data_back.size() * sizeof(GuiQuad), data_back.data(), GL_DYNAMIC_DRAW);
+    size_back = data_back.size();
 
-    const auto &links = sel.proc.links;  sel.offsets.clear();
-    for(size_t i = 0; i < slots.size(); i++)
+    glBindBuffer(GL_ARRAY_BUFFER, buf_gui);
+    glBufferData(GL_ARRAY_BUFFER, data_gui.size() * sizeof(GuiQuad), data_gui.data(), GL_DYNAMIC_DRAW);
+    size_gui = data_gui.size();
+}
+
+void Representation::Selection::fill_sel_links(GLuint buf, size_t &size)
+{
+    const auto &slots = proc.slots;
+    const auto &links = proc.links;
+    if(slot < 0 || slots[slot].neiro_state == GenomeProcessor::s_input)
     {
-        sel.offsets.push_back(buf_gui.size());
-        if(refs[i] == uint32_t(-1) || !slots[i].link_count ||
-            slots[i].neiro_state == GenomeProcessor::s_input)continue;
-
-        uint32_t beg = slots[i].link_start;
-        uint32_t end = beg + slots[i].link_count;
-
-        uint32_t cur = links[beg].source;
-        int32_t weight = 0, level = slots[i].act_level;
-        LinkPainter painter(buf_gui, base_offs, Gui::line_margin, refs[i]);
-        for(uint32_t j = beg; j < end; j++)
-        {
-            if(links[j].source != cur)
-            {
-                uint32_t src = refs[cur];
-                if(src != uint32_t(-1))painter.process(src, weight);
-                else if(slots[cur].neiro_state == GenomeProcessor::s_always_on)level -= 255 * weight;
-                cur = links[j].source;
-            }
-            weight += links[j].weight;
-        }
-        uint32_t src = refs[cur];
-        if(src != uint32_t(-1))painter.process(src, weight);
-        else if(slots[cur].neiro_state == GenomeProcessor::s_always_on)level -= 255 * weight;
-        painter.finalize(sel.mapping.size(), level);
+        glBindBuffer(GL_ARRAY_BUFFER, buf);
+        glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+        size = 0;  return;
     }
-    sel.offsets.push_back(buf_gui.size());
 
+    std::vector<GuiQuad> data;
+    uint32_t beg = slots[slot].link_start;
+    uint32_t end = beg + slots[slot].link_count;
 
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_back]);
-    glBufferData(GL_ARRAY_BUFFER, buf_back.size() * sizeof(GuiQuad), buf_back.data(), GL_STATIC_DRAW);
-    obj_count[pass_back] = buf_back.size();
+    uint32_t cur = links[beg].source;
+    int32_t weight = 0, level = slots[slot].act_level;
+    LinkPainter painter(data, Gui::base_offs, Gui::line_margin, refs[slot]);
+    for(uint32_t j = beg; j < end; j++)
+    {
+        if(links[j].source != cur)
+        {
+            uint32_t src = refs[cur];
+            if(src != uint32_t(-1))painter.process(src, weight);
+            else if(slots[cur].neiro_state == GenomeProcessor::s_always_on)level -= 255 * weight;
+            cur = links[j].source;
+        }
+        weight += links[j].weight;
+    }
+    uint32_t src = refs[cur];
+    if(src != uint32_t(-1))painter.process(src, weight);
+    else if(slots[cur].neiro_state == GenomeProcessor::s_always_on)level -= 255 * weight;
+    painter.finalize(mapping.size(), level);
 
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_gui]);
-    glBufferData(GL_ARRAY_BUFFER, buf_gui.size() * sizeof(GuiQuad), buf_gui.data(), GL_STATIC_DRAW);
-    obj_count[pass_gui] = sel.offsets[0];
+    glBindBuffer(GL_ARRAY_BUFFER, buf);
+    glBufferData(GL_ARRAY_BUFFER, data.size() * sizeof(GuiQuad), data.data(), GL_DYNAMIC_DRAW);
+    size = data.size();
 }
 
 bool hit_test(const World::Tile &tile,
@@ -677,21 +743,16 @@ bool Representation::select(int32_t x, int32_t y)
     {
         if(sel.id == uint64_t(-1))return false;
 
-        GuiBack filler(0, -2, Gui::back_filler);
-        glBindBuffer(GL_ARRAY_BUFFER, buf[inst_back]);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(GuiQuad), &filler, GL_STATIC_DRAW);
-        obj_count[pass_back] = 1;
-
-        glBindBuffer(GL_ARRAY_BUFFER, buf[inst_gui]);
-        glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STATIC_DRAW);
-        obj_count[pass_gui] = 0;
-
-        sel.id = uint64_t(-1);  return true;
+        sel.id = uint64_t(-1);  sel.slot = -1;
+        sel.fill_sel_bufs(buf[inst_back], buf[inst_gui], obj_count[pass_back], obj_count[pass_gui]);
+        sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);  return true;
     }
     if(sel.cr->id == sel.id)return false;
 
     sel.id = sel.cr->id;  sel.pos = sel.cr->pos;  sel.slot = -1;
-    fill_sel_buf(true);  return true;
+    sel.proc.process(world.config, sel.cr->genome);
+    sel.fill_sel_bufs(buf[inst_back], buf[inst_gui], obj_count[pass_back], obj_count[pass_gui]);
+    sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);  return true;
 }
 
 void Representation::update(SDL_Window *window, bool checksum)
@@ -757,6 +818,7 @@ void Representation::update(SDL_Window *window, bool checksum)
     SDL_SetWindowTitle(window, buf);
 }
 
+
 void Representation::draw()
 {
     glViewport(0, 0, cam.width, cam.height);
@@ -775,12 +837,15 @@ void Representation::draw()
     double dx = mul_x * std::exp2(order_x), x0 = x * mul_x + 1;
     double dy = mul_y * std::exp2(order_y), y0 = y * mul_y + 1;
 
+    Program cur = prog_count;
     for(int pass = 0; pass < pass_back; pass++)
     {
-        glBindVertexArray(arr[pass]);  glUseProgram(prog[pass]);
+        if(cur != pass_info[pass].prog)glUseProgram(prog[cur = pass_info[pass].prog]);
+
+        glBindVertexArray(arr[pass]);
         for(int i = 0; i <= ny; i++)for(int j = 0; j <= nx; j++)
         {
-            glUniform4f(i_transform[pass], j * dx - x0, y0 - i * dy, mul_x * tile_size, -mul_y * tile_size);
+            glUniform4f(i_transform[cur], j * dx - x0, y0 - i * dy, mul_x * tile_size, -mul_y * tile_size);
             glDrawElementsInstanced(GL_TRIANGLES, elem_count[pass], GL_UNSIGNED_BYTE, nullptr, obj_count[pass]);
         }
     }
@@ -789,17 +854,16 @@ void Representation::draw()
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     mul_x = 2.0 / cam.width;  mul_y = 2.0 / cam.height;
 
-    glBindVertexArray(arr[pass_back]);  glUseProgram(prog[pass_back]);
-    glUniform4f(i_transform[pass_back], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
+    glUseProgram(prog[prog_back]);  glBindVertexArray(arr[pass_back]);
+    glUniform4f(i_transform[prog_back], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
     glUniform3f(i_size, Gui::panel_width, Gui::line_spacing, sel.slot);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_back], obj_count[pass_back]);
 
-    glBindVertexArray(arr[pass_gui]);  glUseProgram(prog[pass_gui]);
-    glUniform4f(i_transform[pass_gui], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
+    glUseProgram(prog[prog_gui]);  glBindVertexArray(arr[pass_gui]);
+    glUniform4f(i_transform[prog_gui], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
     glUniform1i(i_gui, 0);  glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_gui);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_gui], obj_count[pass_gui]);
 
-    if(sel.slot >= 0)
-        glDrawArraysInstancedBaseInstance(GL_TRIANGLE_STRIP, 0, elem_count[pass_gui],
-            sel.offsets[sel.slot + 1] - sel.offsets[sel.slot], sel.offsets[sel.slot]);
+    glBindVertexArray(arr[pass_link]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_link], obj_count[pass_link]);
 }

@@ -39,19 +39,34 @@ struct Camera
 
 constexpr double draw_scale = 1.0 / tile_size;
 
+struct VertexAttribute;
+
 class Representation
 {
-    enum Pass
+    enum Program
     {
-        pass_food, pass_creature, pass_back, pass_gui, pass_count
+        prog_food, prog_creature, prog_back, prog_gui, prog_count
     };
 
-    enum BufferType
+    enum Pass
+    {
+        pass_food, pass_creature, pass_back, pass_gui, pass_link, pass_count
+    };
+
+    enum Buffer
     {
         vtx_food, inst_food, idx_food,
         vtx_creature, inst_creature, idx_creature,
-        vtx_quad, inst_back, inst_gui,
+        vtx_quad, inst_back, inst_gui, inst_link,
         buf_count
+    };
+
+    struct PassInfo
+    {
+        Program prog;
+        int attr_count;
+        const VertexAttribute *attr;
+        Buffer base, inst, index;
     };
 
     struct Selection
@@ -59,27 +74,30 @@ class Representation
         uint64_t id;
         const Creature *cr;
         GenomeProcessor proc;
-        std::vector<uint32_t> mapping;
-        std::vector<uint32_t> offsets;
+        std::vector<uint32_t> mapping, refs;
         Position pos;  int slot;
+        bool skip_unused;
 
-        Selection() : id(-1), cr(nullptr), slot(-1)
+        Selection() : id(-1), cr(nullptr), slot(-1), skip_unused(true)
         {
         }
+
+        void fill_sel_bufs(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
+        void fill_sel_links(GLuint buf, size_t &size);
     };
+
+
+    static const PassInfo pass_info[pass_count];
 
     const World &world;
     Camera cam;  bool move;
     GLuint prog[pass_count], tex_gui;
-    GLint i_transform[pass_count], i_size, i_gui;
+    GLint i_transform[prog_count], i_size, i_gui;
     GLuint arr[pass_count], buf[buf_count];
     size_t elem_count[pass_count];
     size_t obj_count[pass_count];
     Selection sel;
 
-
-    void create_program(Pass pass, Shader::Index id);
-    void fill_sel_buf(bool skipUnused);
 
     void make_food_shape();
     void make_creature_shape();
