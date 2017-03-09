@@ -597,7 +597,8 @@ void Representation::fill_sel_buf(bool skipUnused)
     for(size_t i = 0; i < slots.size(); i++)
     {
         sel.offsets.push_back(buf_gui.size());
-        if(refs[i] == uint32_t(-1) || !slots[i].link_count)continue;
+        if(refs[i] == uint32_t(-1) || !slots[i].link_count ||
+            slots[i].neiro_state == GenomeProcessor::s_input)continue;
 
         uint32_t beg = slots[i].link_start;
         uint32_t end = beg + slots[i].link_count;

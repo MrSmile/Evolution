@@ -190,8 +190,8 @@ Genome::Gene::Gene(const Config &config, uint32_t slot, int32_t weight, uint32_t
     int shift = 64;  data = 0;
     shift -= config.slot_bits;  data |= uint64_t(slot)   << shift;
     shift -= slot_type_bits;    data |= uint64_t(type)   << shift;
-    shift -= config.base_bits;  data |= uint64_t(base)   << shift;
     shift -= config.slot_bits;  data |= uint64_t(source) << shift;
+    shift -= config.base_bits;  data |= uint64_t(base)   << shift;
     shift -= 8;                 data |= uint64_t(offset) << shift;
     assert(shift >= 0);
 }
@@ -468,9 +468,9 @@ void GenomeProcessor::State::process_gene(const Config &config, Genome::Gene &ge
     uint32_t type = gene.take_bits(slot_type_bits);
     if(!type)
     {
-        int32_t weight = gene.take_bits_signed(config.base_bits);  if(!weight)return;
         uint32_t source = gene.take_bits(config.slot_bits);
-        act_level += weight * gene.take_bits(8);
+        int32_t weight = gene.take_bits_signed(config.base_bits);
+        if(!weight)return;  act_level += weight * gene.take_bits(8);
 
         (weight < 0 ? min_level : max_level) += 255 * weight;
         links.emplace_back(weight, source);  link_count++;  return;
@@ -1260,7 +1260,7 @@ void World::next_step()
 }
 
 
-const char version_string[] = "Evol0000";
+const char version_string[] = "Evol0001";
 
 void World::init()
 {
@@ -1271,12 +1271,12 @@ void World::init()
     config.genome_split_factor = ~(uint32_t(-1) / 64);
     config.chromosome_replace_factor = ~(uint32_t(-1) / 64);
     config.chromosome_copy_prob = uint32_t(-1) / 2;
-    config.bit_mutate_factor = ~(uint32_t(-1) / 256);
+    config.bit_mutate_factor = ~(uint32_t(-1) / 1024);
 
     config.slot_bits = 8;  // 256 slots
     config.base_bits = 8;
-    config.gene_init_cost = 64;
-    config.gene_pass_rate = 1;
+    config.gene_init_cost = 32;
+    config.gene_pass_rate = 0;
 
     config.cost[Slot::womb]    = {256, 1};
     config.cost[Slot::claw]    = {256, 1};
@@ -1287,8 +1287,8 @@ void World::init()
 
     config.cost[Slot::stomach] = {256, 1};
     config.cost[Slot::hide]    = {256, 1};
-    config.cost[Slot::eye]     = {256, 4};
-    config.cost[Slot::radar]   = {256, 4};
+    config.cost[Slot::eye]     = {256, 1};
+    config.cost[Slot::radar]   = {256, 1};
 
     config.cost[Slot::link]    = {0,   0};
 
