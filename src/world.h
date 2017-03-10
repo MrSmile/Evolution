@@ -387,8 +387,9 @@ struct Creature
     Creature &operator = (const Creature &) = delete;
 
     Slot::Type append_slot(const Config &config, const GenomeProcessor::SlotData &slot);
-    Creature(const Config &config, Genome &genome, GenomeProcessor &proc,
-        uint64_t id, const Position &pos, angle_t angle, uint32_t energy);
+    static void calc_mapping(const GenomeProcessor &proc, std::vector<uint32_t> &mapping);
+    Creature(const Config &config, Genome &genome, const GenomeProcessor &proc,
+        uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
     static Creature *spawn(const Config &config, Genome &genome,
         uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
     static Creature *spawn(const Config &config, Random &rand, const Creature &parent,

@@ -15,10 +15,11 @@ namespace Gui
     constexpr uint32_t back_unused = 0xDD330000;
     constexpr uint32_t back_filler = 0xDD000000;
 
+    constexpr int margin       =  4;
+    constexpr int spacing      =  8;
     constexpr int digit_width  =  8;
     constexpr int icon_width   = 16;
     constexpr int line_height  = 16;
-    constexpr int line_margin  =  4;
     constexpr int flag_pos     = 16;
     constexpr int flag_width   =  8;
     constexpr int flag_height  =  8;
@@ -28,10 +29,10 @@ namespace Gui
     constexpr unsigned flag_row     = 3;
     constexpr unsigned end_flag = 1 << 7;
 
-    constexpr int line_spacing = line_height + 2 * line_margin;
-    constexpr unsigned slot_offset = 4 * digit_width + icon_width;
-    constexpr unsigned base_offs = 2 * digit_width + slot_offset;
-    constexpr int panel_width = 6 * slot_offset + 2 * digit_width + 2 * line_margin;
+    constexpr int line_spacing = line_height + 2 * margin;
+    constexpr int slot_width = spacing + 3 * digit_width + icon_width;
+    constexpr int base_offs = margin + 5 * digit_width + icon_width + slot_width;
+    constexpr int panel_width = base_offs + icon_width + 5 * slot_width + margin;
 
     enum Icon
     {
@@ -284,6 +285,7 @@ const Representation::PassInfo Representation::pass_info[] =
     INFO(creature, vtx_creature, inst_creature, idx_creature),
     INFO(back,     vtx_quad,     inst_back,     buf_count),
     INFO(gui,      vtx_quad,     inst_gui,      buf_count),
+    INFO(gui,      vtx_quad,     inst_level,    buf_count),
     INFO(gui,      vtx_quad,     inst_link,     buf_count),
 };
 
@@ -372,7 +374,7 @@ void Representation::make_creature_shape()
 
 void Representation::make_quad_shape()
 {
-    elem_count[pass_back] = elem_count[pass_gui] = elem_count[pass_link] = 4;
+    elem_count[pass_back] = elem_count[pass_gui] = elem_count[pass_level] = elem_count[pass_link] = 4;
 
     Vertex vertex[4] =
     {
@@ -383,6 +385,7 @@ void Representation::make_quad_shape()
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
 
     sel.fill_sel_bufs(buf[inst_back], buf[inst_gui], obj_count[pass_back], obj_count[pass_gui]);
+    sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
     sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
 }
 
@@ -477,7 +480,7 @@ bool Representation::mouse_up(uint8_t button)
 }
 
 
-int write_number(std::vector<GuiQuad> &buf, uint32_t num, int x, int y)
+int write_number(std::vector<GuiQuad> &buf, int x, int y, uint32_t num)
 {
     do
     {
@@ -537,15 +540,14 @@ struct LinkPainter
 
     void put_weight(int xx, int yy, int32_t weight)
     {
-        put_icon(buf, xx, yy, Gui::i_weight);  xx = write_number(buf, std::abs(weight), xx, yy) - Gui::digit_width;
+        put_icon(buf, xx, yy, Gui::i_weight);  xx = write_number(buf, xx, yy, std::abs(weight)) - Gui::digit_width;
         buf.emplace_back(xx, yy, (weight < 0 ? 10 : 11) * Gui::digit_width, 0, Gui::digit_width, Gui::line_height);
     }
 
     void process(uint32_t src, int32_t weight)
     {
-        if(!weight)return;
-        int yy = y + src * Gui::line_spacing;
-        put_weight(x - Gui::icon_width, yy, weight);
+        if(!weight)return;  int yy = y + src * Gui::line_spacing;
+        put_weight(x - Gui::slot_width - Gui::icon_width, yy, weight);
 
         if(src < dst)
         {
@@ -600,15 +602,17 @@ void Representation::Selection::fill_sel_bufs(GLuint buf_back, GLuint buf_gui, s
 
         glBindBuffer(GL_ARRAY_BUFFER, buf_gui);
         glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-        size_gui = 0;  return;
+        size_gui = 0;
+
+        mapping.clear();  return;
     }
 
-    std::vector<GuiBack> data_back;
     const auto &slots = proc.slots;
+    std::vector<GuiBack> data_back;
     data_back.reserve(slots.size() + 1);
 
     std::vector<GuiQuad> data_gui;
-    data_gui.reserve(22 * slots.size());
+    data_gui.reserve(26 * slots.size());
 
     mapping.clear();  int y = 0;
     refs.clear();  refs.resize(slots.size(), -1);
@@ -618,29 +622,46 @@ void Representation::Selection::fill_sel_bufs(GLuint buf_back, GLuint buf_gui, s
 
         refs[i] = mapping.size();  mapping.push_back(i);
         data_back.emplace_back(y, i, slots[i].used ? Gui::back_used : Gui::back_unused);
-        int x = Gui::base_offs + Gui::slot_offset;  y += Gui::line_margin;
+        int x = Gui::base_offs - Gui::icon_width;  y += Gui::margin;
 
-        write_number(data_gui, i, x, y);
+        switch(slots[i].neiro_state)
+        {
+        case GenomeProcessor::s_always_off:
+            write_number(data_gui, x, y, 0);
+            put_icon(data_gui, x, y, Gui::i_off);
+            break;
+
+        case GenomeProcessor::s_always_on:
+            write_number(data_gui, x, y, 255);
+            put_icon(data_gui, x, y, Gui::i_on);
+            break;
+
+        default:
+            put_icon(data_gui, x, y, Gui::i_active);
+        }
+        x += Gui::icon_width + Gui::slot_width;
+
+        write_number(data_gui, x, y, i);
         put_icon(data_gui, x, y, slots[i].type);
         const Gui::TypeIcons &icons = Gui::icons[slots[i].type];
         if(icons.base)
         {
-            write_number(data_gui, slots[i].base - 1, x += Gui::slot_offset, y);
+            write_number(data_gui, x += Gui::slot_width, y, slots[i].base - 1);
             put_icon(data_gui, x, y, icons.base);
         }
         if(icons.angle1)
         {
-            write_number(data_gui, slots[i].angle1, x += Gui::slot_offset, y);
+            write_number(data_gui, x += Gui::slot_width, y, slots[i].angle1);
             put_icon(data_gui, x, y, icons.angle1);
         }
         if(icons.angle2)
         {
-            write_number(data_gui, slots[i].angle2, x += Gui::slot_offset, y);
+            write_number(data_gui, x += Gui::slot_width, y, slots[i].angle2);
             put_icon(data_gui, x, y, icons.angle2);
         }
         if(icons.radius)
         {
-            write_number(data_gui, slots[i].radius, x += Gui::slot_offset, y);
+            write_number(data_gui, x += Gui::slot_width, y, slots[i].radius);
             put_icon(data_gui, x, y, icons.radius);
         }
         if(icons.flag_count)
@@ -648,7 +669,7 @@ void Representation::Selection::fill_sel_bufs(GLuint buf_back, GLuint buf_gui, s
             x += Gui::icon_width + Gui::flag_width;
             put_flags(data_gui, x, y, slots[i].flags, icons.flag_count);
         }
-        y += Gui::line_spacing - Gui::line_margin;
+        y += Gui::line_spacing - Gui::margin;
     }
     data_back.emplace_back(y, -2, Gui::back_filler);
 
@@ -659,6 +680,25 @@ void Representation::Selection::fill_sel_bufs(GLuint buf_back, GLuint buf_gui, s
     glBindBuffer(GL_ARRAY_BUFFER, buf_gui);
     glBufferData(GL_ARRAY_BUFFER, data_gui.size() * sizeof(GuiQuad), data_gui.data(), GL_DYNAMIC_DRAW);
     size_gui = data_gui.size();
+}
+
+void Representation::Selection::fill_sel_levels(GLuint buf, size_t &size)
+{
+    std::vector<GuiQuad> data;
+    data.reserve(3 * mapping.size());
+
+    const auto &slots = proc.slots;
+    int x = Gui::base_offs - Gui::icon_width, y = Gui::margin;
+    for(size_t i = 0; i < mapping.size(); i++, y += Gui::line_spacing)
+    {
+        if(slots[mapping[i]].neiro_state > GenomeProcessor::s_input)continue;
+        uint32_t index = input_mapping[mapping[i]];  if(index == uint32_t(-1))continue;
+        write_number(data, x, y, cr->input[index]);
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf);
+    glBufferData(GL_ARRAY_BUFFER, data.size() * sizeof(GuiQuad), data.data(), GL_STREAM_DRAW);
+    size = data.size();
 }
 
 void Representation::Selection::fill_sel_links(GLuint buf, size_t &size)
@@ -678,7 +718,7 @@ void Representation::Selection::fill_sel_links(GLuint buf, size_t &size)
 
     uint32_t cur = links[beg].source;
     int32_t weight = 0, level = slots[slot].act_level;
-    LinkPainter painter(data, Gui::base_offs, Gui::line_margin, refs[slot]);
+    LinkPainter painter(data, Gui::base_offs, Gui::margin, refs[slot]);
     for(uint32_t j = beg; j < end; j++)
     {
         if(links[j].source != cur)
@@ -745,14 +785,18 @@ bool Representation::select(int32_t x, int32_t y)
 
         sel.id = uint64_t(-1);  sel.slot = -1;
         sel.fill_sel_bufs(buf[inst_back], buf[inst_gui], obj_count[pass_back], obj_count[pass_gui]);
-        sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);  return true;
+        sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
+        sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
+        return true;
     }
     if(sel.cr->id == sel.id)return false;
 
     sel.id = sel.cr->id;  sel.pos = sel.cr->pos;  sel.slot = -1;
-    sel.proc.process(world.config, sel.cr->genome);
+    sel.proc.process(world.config, sel.cr->genome);  Creature::calc_mapping(sel.proc, sel.input_mapping);
     sel.fill_sel_bufs(buf[inst_back], buf[inst_gui], obj_count[pass_back], obj_count[pass_gui]);
-    sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);  return true;
+    sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
+    sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
+    return true;
 }
 
 void Representation::update(SDL_Window *window, bool checksum)
@@ -788,6 +832,7 @@ void Representation::update(SDL_Window *window, bool checksum)
 
     if(sel.cr)
     {
+        sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
         cam.x += sel.cr->pos.x - sel.pos.x;
         cam.y += sel.cr->pos.y - sel.pos.y;
         sel.pos = sel.cr->pos;
@@ -863,6 +908,9 @@ void Representation::draw()
     glUniform4f(i_transform[prog_gui], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
     glUniform1i(i_gui, 0);  glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_gui);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_gui], obj_count[pass_gui]);
+
+    glBindVertexArray(arr[pass_level]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_level], obj_count[pass_level]);
 
     glBindVertexArray(arr[pass_link]);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_link], obj_count[pass_link]);

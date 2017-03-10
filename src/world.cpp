@@ -744,10 +744,39 @@ Slot::Type Creature::append_slot(const Config &config, const GenomeProcessor::Sl
 
 uint32_t update_counters(const uint32_t *count, uint32_t *offset, uint32_t &pos, Slot::Type type)
 {
-    offset[type] = pos;  pos += count[type];  return count[type];
+    uint32_t n = count[type];
+    if(type == Slot::signal)n += count[Slot::mouth];
+    offset[type] = pos;  pos += n;  return n;
 }
 
-Creature::Creature(const Config &config, Genome &genome, GenomeProcessor &proc,
+void Creature::calc_mapping(const GenomeProcessor &proc, std::vector<uint32_t> &mapping)
+{
+    uint32_t offset[Slot::invalid], n = 0;
+    update_counters(proc.count, offset, n, Slot::womb);
+    update_counters(proc.count, offset, n, Slot::claw);
+    update_counters(proc.count, offset, n, Slot::leg);
+    update_counters(proc.count, offset, n, Slot::rotator);
+    update_counters(proc.count, offset, n, Slot::signal);
+    update_counters(proc.count, offset, n, Slot::link);
+    update_counters(proc.count, offset, n, Slot::stomach);
+    update_counters(proc.count, offset, n, Slot::hide);
+    update_counters(proc.count, offset, n, Slot::eye);
+    update_counters(proc.count, offset, n, Slot::radar);
+
+    mapping.resize(proc.slots.size());
+    for(size_t i = 0; i < proc.slots.size(); i++)
+    {
+        if(!proc.slots[i].used)
+        {
+            mapping[i] = uint32_t(-1);  continue;
+        }
+        Slot::Type type = proc.slots[i].type;
+        if(type == Slot::mouth)type = Slot::signal;
+        mapping[i] = offset[type]++;
+    }
+}
+
+Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &proc,
     uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy) :
     id(id), genome(std::move(genome)), pos(pos), angle(angle),
     passive_energy(proc.passive_cost.initial), max_energy(0),
@@ -755,7 +784,6 @@ Creature::Creature(const Config &config, Genome &genome, GenomeProcessor &proc,
     damage(0), father(config.base_r2), flags(f_creature)
 {
     uint32_t offset[Slot::invalid], n = 0;
-    proc.count[Slot::signal] += proc.count[Slot::mouth];
     wombs.reserve(update_counters(proc.count, offset, n, Slot::womb));
     claws.reserve(update_counters(proc.count, offset, n, Slot::claw));
     legs.reserve(update_counters(proc.count, offset, n, Slot::leg));
@@ -773,9 +801,9 @@ Creature::Creature(const Config &config, Genome &genome, GenomeProcessor &proc,
     std::vector<uint32_t> mapping(proc.slots.size(), -1);
     for(size_t i = 0; i < proc.slots.size(); i++)
     {
-        const auto &slot = proc.slots[i];  if(!slot.used)continue;
+        if(!proc.slots[i].used)continue;
 
-        uint32_t index = offset[append_slot(config, slot)]++;
+        uint32_t index = offset[append_slot(config, proc.slots[i])]++;
         mapping[i] = index;  slots[index] = i;
 
         if(index < neirons.size())order.push_back(index);
@@ -788,7 +816,7 @@ Creature::Creature(const Config &config, Genome &genome, GenomeProcessor &proc,
     assert(claws.size()    == proc.count[Slot::claw]);
     assert(legs.size()     == proc.count[Slot::leg]);
     assert(rotators.size() == proc.count[Slot::rotator]);
-    assert(signals.size()  == proc.count[Slot::signal]);
+    assert(signals.size()  == proc.count[Slot::mouth] + proc.count[Slot::signal]);
 
     assert(stomachs.size() == proc.count[Slot::stomach]);
     assert(hides.size()    == proc.count[Slot::hide]);

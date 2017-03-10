@@ -50,14 +50,14 @@ class Representation
 
     enum Pass
     {
-        pass_food, pass_creature, pass_back, pass_gui, pass_link, pass_count
+        pass_food, pass_creature, pass_back, pass_gui, pass_level, pass_link, pass_count
     };
 
     enum Buffer
     {
         vtx_food, inst_food, idx_food,
         vtx_creature, inst_creature, idx_creature,
-        vtx_quad, inst_back, inst_gui, inst_link,
+        vtx_quad, inst_back, inst_gui, inst_level, inst_link,
         buf_count
     };
 
@@ -75,6 +75,7 @@ class Representation
         const Creature *cr;
         GenomeProcessor proc;
         std::vector<uint32_t> mapping, refs;
+        std::vector<uint32_t> input_mapping;
         Position pos;  int slot;
         bool skip_unused;
 
@@ -83,6 +84,7 @@ class Representation
         }
 
         void fill_sel_bufs(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
+        void fill_sel_levels(GLuint buf, size_t &size);
         void fill_sel_links(GLuint buf, size_t &size);
     };
 
