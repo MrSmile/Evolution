@@ -45,12 +45,12 @@ class Representation
 {
     enum Program
     {
-        prog_food, prog_creature, prog_back, prog_gui, prog_count
+        prog_food, prog_creature, prog_back, prog_gui, prog_panel, prog_count
     };
 
     enum Pass
     {
-        pass_food, pass_creature, pass_back, pass_gui, pass_level, pass_link, pass_count
+        pass_food, pass_creature, pass_back, pass_gui, pass_level, pass_link, pass_panel, pass_count
     };
 
     enum Buffer
@@ -58,6 +58,7 @@ class Representation
         vtx_food, inst_food, idx_food,
         vtx_creature, inst_creature, idx_creature,
         vtx_quad, inst_back, inst_gui, inst_level, inst_link,
+        vtx_panel, idx_panel,
         buf_count
     };
 
@@ -93,8 +94,8 @@ class Representation
 
     const World &world;
     Camera cam;  bool move;
-    GLuint prog[pass_count], tex_gui;
-    GLint i_transform[prog_count], i_size, i_gui;
+    GLuint prog[pass_count], tex_gui, tex_panel;
+    GLint i_transform[prog_count], i_size, i_gui, i_panel;
     GLuint arr[pass_count], buf[buf_count];
     size_t elem_count[pass_count];
     size_t obj_count[pass_count];
@@ -104,6 +105,7 @@ class Representation
     void make_food_shape();
     void make_creature_shape();
     void make_quad_shape();
+    void make_panel();
 
 public:
     explicit Representation(const World &world, SDL_Window *window);

@@ -15,14 +15,19 @@ namespace Gui
     constexpr uint32_t back_unused = 0xDD330000;
     constexpr uint32_t back_filler = 0xDD000000;
 
-    constexpr int margin       =  4;
-    constexpr int spacing      =  8;
-    constexpr int digit_width  =  8;
-    constexpr int icon_width   = 16;
-    constexpr int line_height  = 16;
-    constexpr int flag_pos     = 16;
-    constexpr int flag_width   =  8;
-    constexpr int flag_height  =  8;
+    constexpr int panel_border  =  8;
+    constexpr int panel_stretch =  8;
+    constexpr int scroll_width  = 16;
+    constexpr int header_height = 64;
+
+    constexpr int margin        =  4;
+    constexpr int spacing       =  8;
+    constexpr int digit_width   =  8;
+    constexpr int icon_width    = 16;
+    constexpr int line_height   = 16;
+    constexpr int flag_pos      = 16;
+    constexpr int flag_width    =  8;
+    constexpr int flag_height   =  8;
 
     constexpr unsigned icon_offset  = 8;
     constexpr unsigned icon_row     = 4;
@@ -30,9 +35,13 @@ namespace Gui
     constexpr unsigned end_flag = 1 << 7;
 
     constexpr int line_spacing = line_height + 2 * margin;
-    constexpr int slot_width = spacing + 3 * digit_width + icon_width;
-    constexpr int base_offs = margin + 5 * digit_width + icon_width + slot_width;
-    constexpr int panel_width = base_offs + icon_width + 5 * slot_width + margin;
+    constexpr int item_width = spacing + 3 * digit_width + icon_width;
+    constexpr int base_offs = margin + 5 * digit_width + icon_width + item_width;
+    constexpr int slot_width = base_offs + icon_width + 5 * item_width + margin;
+    constexpr int gene_width = 5 * item_width + 2 * margin - spacing;
+
+    constexpr int panel_width = slot_width + gene_width + 2 * scroll_width;
+
 
     enum Icon
     {
@@ -209,6 +218,13 @@ struct GuiQuad
     }
 };
 
+struct PanelVertex
+{
+    GLshort x, y;
+    GLushort stretch;
+    GLubyte tx, ty;
+};
+
 
 enum AttributeFlags
 {
@@ -250,27 +266,33 @@ void register_attributes(const VertexAttribute *attr, int attr_count, GLuint buf
 
 const VertexAttribute layout_food[] =
 {
-    ATTR(Vertex,       x,     2,       GL_FLOAT,          0),
-    ATTR(FoodData,     x,     4,       GL_FLOAT,          f_instance),
+    ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
+    ATTR(FoodData,     x,       4,       GL_FLOAT,          f_instance),
 };
 const VertexAttribute layout_creature[] =
 {
-    ATTR(Vertex,       x,     2,       GL_FLOAT,          0),
-    ATTR(CreatureData, x,     2,       GL_FLOAT,          f_instance),
-    ATTR(CreatureData, rad,   3,       GL_FLOAT,          f_instance),
-    ATTR(CreatureData, angle, 4,       GL_UNSIGNED_BYTE,  f_instance | f_normalize),
+    ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
+    ATTR(CreatureData, x,       2,       GL_FLOAT,          f_instance),
+    ATTR(CreatureData, rad,     3,       GL_FLOAT,          f_instance),
+    ATTR(CreatureData, angle,   4,       GL_UNSIGNED_BYTE,  f_instance | f_normalize),
 };
 const VertexAttribute layout_back[] =
 {
-    ATTR(Vertex,       x,     2,       GL_FLOAT,          0),
-    ATTR(GuiBack,      pos,   2,       GL_SHORT,          f_instance),
-    ATTR(GuiBack,      color, GL_BGRA, GL_UNSIGNED_BYTE,  f_instance | f_normalize),
+    ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
+    ATTR(GuiBack,      pos,     2,       GL_SHORT,          f_instance),
+    ATTR(GuiBack,      color,   GL_BGRA, GL_UNSIGNED_BYTE,  f_instance | f_normalize),
 };
 const VertexAttribute layout_gui[] =
 {
-    ATTR(Vertex,       x,     2,       GL_FLOAT,          0),
-    ATTR(GuiQuad,      x,     2,       GL_SHORT,          f_instance),
-    ATTR(GuiQuad,      tx,    4,       GL_UNSIGNED_SHORT, f_instance),
+    ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
+    ATTR(GuiQuad,      x,       2,       GL_SHORT,          f_instance),
+    ATTR(GuiQuad,      tx,      4,       GL_UNSIGNED_SHORT, f_instance),
+};
+const VertexAttribute layout_panel[] =
+{
+    ATTR(PanelVertex,  x,       2,       GL_SHORT,          0),
+    ATTR(PanelVertex,  stretch, 1,       GL_UNSIGNED_SHORT, f_normalize),
+    ATTR(PanelVertex,  tx,      2,       GL_UNSIGNED_BYTE,  0),
 };
 
 #undef ATTR
@@ -287,6 +309,7 @@ const Representation::PassInfo Representation::pass_info[] =
     INFO(gui,      vtx_quad,     inst_gui,      buf_count),
     INFO(gui,      vtx_quad,     inst_level,    buf_count),
     INFO(gui,      vtx_quad,     inst_link,     buf_count),
+    INFO(panel,    vtx_panel,    buf_count,     idx_panel),
 };
 
 #undef INFO
@@ -389,6 +412,84 @@ void Representation::make_quad_shape()
     sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
 }
 
+
+void put_coords(GLshort *pos, GLubyte *tex, int &index, int width, bool stretch = false)
+{
+    pos[index] = pos[index - 1] + width;
+    tex[index] = tex[index - 1] + (stretch ? Gui::panel_stretch : width);
+    index++;
+}
+
+void put_strip(GLubyte *buf, int &index, GLubyte base, GLubyte n, int flags)
+{
+    for(GLubyte i = 0; i < n; i++)
+    {
+        buf[index++] = base + i;  buf[index++] = base + n + i;
+        if(flags & (1 << i))buf[index++] = GLubyte(-1);
+    }
+}
+
+void put_strip(GLubyte *buf, int &index, GLubyte base, GLubyte n)
+{
+    put_strip(buf, index, base, n, 1 << (n - 1));
+}
+
+void Representation::make_panel()
+{
+    constexpr int nx = 6, ny = 6;
+    constexpr int m = (2 * nx + 1) * (ny - 1) + 1;
+    elem_count[pass_panel] = m;
+
+    int index;
+    GLshort  x[nx],  y[ny];
+    GLubyte tx[nx], ty[ny];
+
+    x[0] = -Gui::panel_border;  tx[0] = 0;  index = 1;
+    put_coords(x, tx, index, 2 * Gui::panel_border);
+    put_coords(x, tx, index, Gui::slot_width - 2 * Gui::panel_border, true);
+    put_coords(x, tx, index, Gui::scroll_width + 2 * Gui::panel_border);
+    put_coords(x, tx, index, Gui::gene_width - 2 * Gui::panel_border, true);
+    put_coords(x, tx, index, Gui::scroll_width + Gui::panel_border);
+    assert(index == nx);
+
+    y[0] = 0;  ty[0] = Gui::panel_border;  index = 1;
+    put_coords(y, ty, index, Gui::panel_border);
+    put_coords(y, ty, index, Gui::header_height - 2 * Gui::panel_border, true);
+    put_coords(y, ty, index, 2 * Gui::panel_border);
+    put_coords(y, ty, index, -y[3] - Gui::panel_border, true);
+    put_coords(y, ty, index, Gui::panel_border);
+    assert(index == ny);
+
+    PanelVertex vertex[nx * ny];
+    for(int i = 0, k = 0; i < ny; i++)for(int j = 0; j < nx; j++, k++)
+    {
+        vertex[k].x = x[j];  vertex[k].tx = tx[j];
+        vertex[k].y = y[i];  vertex[k].ty = ty[i];
+        vertex[k].stretch = i > 3 ? GLushort(-1) : 0;
+    }
+
+    GLubyte strip[m];  index = 0;
+    put_strip(strip, index, 0 * nx, nx);
+    put_strip(strip, index, 1 * nx, nx);
+    put_strip(strip, index, 2 * nx, nx);
+    put_strip(strip, index, 3 * nx, nx, 0x2A);
+    put_strip(strip, index, 4 * nx, nx, 0);
+    assert(index == m);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_panel]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_panel]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(strip), strip, GL_STATIC_DRAW);
+}
+
+GLuint load_texture(Image::Index id)
+{
+    GLuint tex;  glGenTextures(1, &tex);  glBindTexture(GL_TEXTURE_2D, tex);  const ImageDesc &image = images[id];
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, image.width, image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image.pixels);
+    return tex;
+}
+
 Representation::Representation(const World &world, SDL_Window *window) : world(world), cam(window), move(false)
 {
     prog[prog_food] = create_program(Shader::food);
@@ -405,6 +506,10 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
     i_transform[prog_gui] = glGetUniformLocation(prog[prog_gui], "transform");
     i_gui = glGetUniformLocation(prog[prog_gui], "gui");
 
+    prog[prog_panel] = create_program(Shader::panel);
+    i_transform[prog_panel] = glGetUniformLocation(prog[prog_panel], "transform");
+    i_panel = glGetUniformLocation(prog[prog_panel], "height");
+
 
     glGenVertexArrays(pass_count, arr);
     glGenBuffers(buf_count, buf);
@@ -418,21 +523,25 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
     }
     glBindVertexArray(0);
 
-    glBindTexture(GL_TEXTURE_2D, tex_gui);  const ImageDesc &image = images[Image::gui];
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, image.width, image.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, image.pixels);
+    tex_gui = load_texture(Image::gui);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+    tex_panel = load_texture(Image::panel);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
     make_food_shape();
     make_creature_shape();
     make_quad_shape();
+    make_panel();
 }
 
 Representation::~Representation()
 {
     for(int i = 0; i < prog_count; i++)glDeleteProgram(prog[i]);
     glDeleteVertexArrays(pass_count, arr);  glDeleteBuffers(buf_count, buf);
-    glDeleteTextures(1, &tex_gui);
+    glDeleteTextures(1, &tex_gui);  glDeleteTextures(1, &tex_panel);
 }
 
 
@@ -450,9 +559,10 @@ bool Representation::mouse_down(int32_t x, int32_t y, uint8_t button)
 {
     if(x >= cam.width - Gui::panel_width)
     {
-        if(y < 0)return false;
+        if(y < Gui::header_height)return false;
+        if(x >= cam.width - Gui::panel_width + Gui::slot_width)return false;
 
-        uint32_t pos = y / Gui::line_spacing;
+        uint32_t pos = (y - Gui::header_height) / Gui::line_spacing;
         int slot = pos < sel.mapping.size() ? sel.mapping[pos] : -1;
         if(sel.slot == slot)return false;
 
@@ -547,7 +657,7 @@ struct LinkPainter
     void process(uint32_t src, int32_t weight)
     {
         if(!weight)return;  int yy = y + src * Gui::line_spacing;
-        put_weight(x - Gui::slot_width - Gui::icon_width, yy, weight);
+        put_weight(x - Gui::item_width - Gui::icon_width, yy, weight);
 
         if(src < dst)
         {
@@ -639,29 +749,29 @@ void Representation::Selection::fill_sel_bufs(GLuint buf_back, GLuint buf_gui, s
         default:
             put_icon(data_gui, x, y, Gui::i_active);
         }
-        x += Gui::icon_width + Gui::slot_width;
+        x += Gui::icon_width + Gui::item_width;
 
         write_number(data_gui, x, y, i);
         put_icon(data_gui, x, y, slots[i].type);
         const Gui::TypeIcons &icons = Gui::icons[slots[i].type];
         if(icons.base)
         {
-            write_number(data_gui, x += Gui::slot_width, y, slots[i].base - 1);
+            write_number(data_gui, x += Gui::item_width, y, slots[i].base - 1);
             put_icon(data_gui, x, y, icons.base);
         }
         if(icons.angle1)
         {
-            write_number(data_gui, x += Gui::slot_width, y, slots[i].angle1);
+            write_number(data_gui, x += Gui::item_width, y, slots[i].angle1);
             put_icon(data_gui, x, y, icons.angle1);
         }
         if(icons.angle2)
         {
-            write_number(data_gui, x += Gui::slot_width, y, slots[i].angle2);
+            write_number(data_gui, x += Gui::item_width, y, slots[i].angle2);
             put_icon(data_gui, x, y, icons.angle2);
         }
         if(icons.radius)
         {
-            write_number(data_gui, x += Gui::slot_width, y, slots[i].radius);
+            write_number(data_gui, x += Gui::item_width, y, slots[i].radius);
             put_icon(data_gui, x, y, icons.radius);
         }
         if(icons.flag_count)
@@ -869,6 +979,9 @@ void Representation::draw()
     glViewport(0, 0, cam.width, cam.height);
     glClearColor(0.0, 0.0, 0.0, 1.0);
     glClear(GL_COLOR_BUFFER_BIT);
+
+    glEnable(GL_PRIMITIVE_RESTART);
+    glPrimitiveRestartIndex(255);
     glDisable(GL_BLEND);
 
     double mul_x = 2 / (cam.width  * cam.scale);
@@ -895,17 +1008,23 @@ void Representation::draw()
         }
     }
 
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     mul_x = 2.0 / cam.width;  mul_y = 2.0 / cam.height;
+    x0 = 1 - Gui::panel_width * mul_x;
+    y0 = 1 - Gui::header_height * mul_y;
+
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(cam.width - Gui::panel_width, 0, Gui::slot_width, cam.height - Gui::header_height);
 
     glUseProgram(prog[prog_back]);  glBindVertexArray(arr[pass_back]);
-    glUniform4f(i_transform[prog_back], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
-    glUniform3f(i_size, Gui::panel_width, Gui::line_spacing, sel.slot);
+    glUniform4f(i_transform[prog_back], x0, y0, mul_x, -mul_y);
+    glUniform3f(i_size, Gui::slot_width, Gui::line_spacing, sel.slot);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_back], obj_count[pass_back]);
 
     glUseProgram(prog[prog_gui]);  glBindVertexArray(arr[pass_gui]);
-    glUniform4f(i_transform[prog_gui], 1 - Gui::panel_width * mul_x, 1, mul_x, -mul_y);
+    glUniform4f(i_transform[prog_gui], x0, y0, mul_x, -mul_y);
     glUniform1i(i_gui, 0);  glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_gui);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_gui], obj_count[pass_gui]);
 
@@ -914,4 +1033,11 @@ void Representation::draw()
 
     glBindVertexArray(arr[pass_link]);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_link], obj_count[pass_link]);
+
+    glDisable(GL_SCISSOR_TEST);
+
+    glUseProgram(prog[prog_panel]);  glBindVertexArray(arr[pass_panel]);
+    glUniform4f(i_transform[prog_panel], x0, 1, mul_x, -mul_y);
+    glUniform1f(i_panel, cam.height);  glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_panel);
+    glDrawElements(GL_TRIANGLE_STRIP, elem_count[pass_panel], GL_UNSIGNED_BYTE, nullptr);
 }

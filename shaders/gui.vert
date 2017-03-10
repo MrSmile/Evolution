@@ -12,4 +12,3 @@ void main()
     gl_Position = vec4(transform.xy + pos * transform.zw, 0.5, 1.0);
     texcoord = (rect.xy + offs) / 128.0;
 }
-
