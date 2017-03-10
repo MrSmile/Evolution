@@ -22,8 +22,8 @@ struct Camera
     static constexpr int max_scale = +32 * 4;
 
 
-    int32_t width, height;
-    int32_t log_scale;
+    int width, height;
+    int log_scale;
     uint64_t x, y;
     double scale;
 
@@ -31,9 +31,9 @@ struct Camera
     void update_scale();
 
     Camera(SDL_Window *window);
-    void resize(int32_t w, int32_t h);
-    void move(int32_t dx, int32_t dy);
-    void rescale(int32_t delta);
+    void resize(int w, int h);
+    void move(int dx, int dy);
+    void rescale(int delta);
 };
 
 
@@ -70,6 +70,11 @@ class Representation
         Buffer base, inst, index;
     };
 
+    enum HitTest
+    {
+        t_none, t_field, t_header, t_slots, t_slot_scroll
+    };
+
     struct Selection
     {
         uint64_t id;
@@ -77,12 +82,16 @@ class Representation
         GenomeProcessor proc;
         std::vector<uint32_t> mapping, refs;
         std::vector<uint32_t> input_mapping;
-        Position pos;  int slot;
+        int slot, slot_scroll;
         bool skip_unused;
+        Position pos;
 
-        Selection() : id(-1), cr(nullptr), slot(-1), skip_unused(true)
+        Selection() : id(-1), cr(nullptr), slot(-1), slot_scroll(0), skip_unused(false)
         {
         }
+
+        void update_scroll(const Camera &cam, int delta);
+        void drag_scroll(const Camera &cam, int delta);
 
         void fill_sel_bufs(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
         void fill_sel_levels(GLuint buf, size_t &size);
@@ -93,7 +102,7 @@ class Representation
     static const PassInfo pass_info[pass_count];
 
     const World &world;
-    Camera cam;  bool move;
+    Camera cam;  HitTest move;
     GLuint prog[pass_count], tex_gui, tex_panel;
     GLint i_transform[prog_count], i_size, i_gui, i_panel;
     GLuint arr[pass_count], buf[buf_count];
@@ -101,6 +110,8 @@ class Representation
     size_t obj_count[pass_count];
     Selection sel;
 
+
+    HitTest hit_test(int &x, int &y);
 
     void make_food_shape();
     void make_creature_shape();
@@ -111,13 +122,13 @@ public:
     explicit Representation(const World &world, SDL_Window *window);
     ~Representation();
 
-    void resize(int32_t w, int32_t h);
-    bool mouse_wheel(int32_t delta);
-    bool mouse_down(int32_t x, int32_t y, uint8_t button);
-    bool mouse_move(int32_t dx, int32_t dy);
+    void resize(int w, int h);
+    bool mouse_wheel(int delta);
+    bool mouse_down(int x, int y, uint8_t button);
+    bool mouse_move(int dx, int dy);
     bool mouse_up(uint8_t button);
 
-    bool select(int32_t x, int32_t y);
+    bool select(int x, int y);
     void update(SDL_Window *window, bool checksum);
     void draw();
 };

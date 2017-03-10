@@ -90,6 +90,9 @@ namespace Gui
         {0x40, 0x30}, {0x40, 0x70}, {0x40, 0x40}, {0x40, 0x60},
         {0x60, 0x00}, {0x70, 0x00}
     };
+
+    constexpr int scroll_pos_x = 104;
+    constexpr int scroll_pos_y =   8;
 }
 
 
@@ -116,18 +119,18 @@ Camera::Camera(SDL_Window *window) : log_scale(8 / scale_step), x(0), y(0)
     SDL_GetWindowSize(window, &width, &height);  update_scale();
 }
 
-void Camera::resize(int32_t w, int32_t h)
+void Camera::resize(int w, int h)
 {
     width = w;  height = h;
 }
 
-void Camera::move(int32_t dx, int32_t dy)
+void Camera::move(int dx, int dy)
 {
     x -= std::lround(dx * scale);
     y -= std::lround(dy * scale);
 }
 
-void Camera::rescale(int32_t delta)
+void Camera::rescale(int delta)
 {
     log_scale += delta;
     //if(log_scale < min_scale)log_scale = min_scale;
@@ -415,7 +418,7 @@ void Representation::make_quad_shape()
 
 void put_coords(GLshort *pos, GLubyte *tex, int &index, int width, bool stretch = false)
 {
-    pos[index] = pos[index - 1] + width;
+    pos[index] = width < 0 ? width : pos[index - 1] + width;
     tex[index] = tex[index - 1] + (stretch ? Gui::panel_stretch : width);
     index++;
 }
@@ -436,13 +439,14 @@ void put_strip(GLubyte *buf, int &index, GLubyte base, GLubyte n)
 
 void Representation::make_panel()
 {
-    constexpr int nx = 6, ny = 6;
+    constexpr int nx = 6, ny = 6, ns = 4;
     constexpr int m = (2 * nx + 1) * (ny - 1) + 1;
     elem_count[pass_panel] = m;
+    obj_count[pass_panel] = 2 * ns;
 
     int index;
-    GLshort  x[nx],  y[ny];
-    GLubyte tx[nx], ty[ny];
+    GLshort  x[nx],  y[ny],  s[ns];
+    GLubyte tx[nx], ty[ny], ts[ns];
 
     x[0] = -Gui::panel_border;  tx[0] = 0;  index = 1;
     put_coords(x, tx, index, 2 * Gui::panel_border);
@@ -456,11 +460,17 @@ void Representation::make_panel()
     put_coords(y, ty, index, Gui::panel_border);
     put_coords(y, ty, index, Gui::header_height - 2 * Gui::panel_border, true);
     put_coords(y, ty, index, 2 * Gui::panel_border);
-    put_coords(y, ty, index, -y[3] - Gui::panel_border, true);
+    put_coords(y, ty, index, -Gui::panel_border, true);
     put_coords(y, ty, index, Gui::panel_border);
     assert(index == ny);
 
-    PanelVertex vertex[nx * ny];
+    s[0] = 0;  ts[0] = Gui::scroll_pos_y;  index = 1;
+    put_coords(s, ts, index, Gui::panel_border);
+    put_coords(s, ts, index, 0, true);
+    put_coords(s, ts, index, Gui::panel_border);
+    assert(index == ns);
+
+    PanelVertex vertex[nx * ny + 2 * ns];
     for(int i = 0, k = 0; i < ny; i++)for(int j = 0; j < nx; j++, k++)
     {
         vertex[k].x = x[j];  vertex[k].tx = tx[j];
@@ -468,13 +478,27 @@ void Representation::make_panel()
         vertex[k].stretch = i > 3 ? GLushort(-1) : 0;
     }
 
-    GLubyte strip[m];  index = 0;
+    index = nx * ny;
+    for(int i = 0; i < ns; i++, index += 2)
+    {
+        vertex[index + 1].x = 0;  vertex[index + 1].tx = Gui::scroll_pos_x;
+        vertex[index].x  = vertex[index + 1].x  + Gui::scroll_width;
+        vertex[index].tx = vertex[index + 1].tx + Gui::scroll_width;
+
+        vertex[index].y  = vertex[index + 1].y  = s[i];
+        vertex[index].ty = vertex[index + 1].ty = ts[i];
+        vertex[index].stretch = vertex[index + 1].stretch = i > 1 ? GLushort(-1) : 0;
+    }
+
+    GLubyte strip[m + 2 * ns];  index = 0;
     put_strip(strip, index, 0 * nx, nx);
     put_strip(strip, index, 1 * nx, nx);
     put_strip(strip, index, 2 * nx, nx);
     put_strip(strip, index, 3 * nx, nx, 0x2A);
     put_strip(strip, index, 4 * nx, nx, 0);
     assert(index == m);
+
+    for(int i = 0; i < 2 * ns; i++)strip[index + i] = nx * ny + i;
 
     glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_panel]);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
@@ -490,7 +514,7 @@ GLuint load_texture(Image::Index id)
     return tex;
 }
 
-Representation::Representation(const World &world, SDL_Window *window) : world(world), cam(window), move(false)
+Representation::Representation(const World &world, SDL_Window *window) : world(world), cam(window), move(t_none)
 {
     prog[prog_food] = create_program(Shader::food);
     i_transform[prog_food] = glGetUniformLocation(prog[prog_food], "transform");
@@ -545,48 +569,116 @@ Representation::~Representation()
 }
 
 
-void Representation::resize(int32_t w, int32_t h)
+void Representation::Selection::update_scroll(const Camera &cam, int delta)
+{
+    int max_scroll = int(mapping.size() + 1) * Gui::line_spacing - cam.height + Gui::header_height;
+    slot_scroll = std::max(0, std::min(max_scroll, slot_scroll + delta));
+}
+
+void Representation::Selection::drag_scroll(const Camera &cam, int delta)
+{
+    int gap = cam.height - Gui::header_height - 2 * Gui::panel_border;  if(gap <= 0)return;
+    double scale = int(mapping.size() + 1) * Gui::line_spacing / gap;
+    update_scroll(cam, std::lround(delta * scale));
+}
+
+
+void Representation::resize(int w, int h)
 {
     cam.resize(w, h);
 }
 
-bool Representation::mouse_wheel(int32_t delta)
+Representation::HitTest Representation::hit_test(int &x, int &y)
 {
-    cam.rescale(delta);  return true;
-}
+    if(x < cam.width - Gui::panel_width)return t_field;
+    x -= cam.width - Gui::panel_width;
 
-bool Representation::mouse_down(int32_t x, int32_t y, uint8_t button)
-{
-    if(x >= cam.width - Gui::panel_width)
+    if(y < Gui::header_height)return t_header;
+    y -= Gui::header_height;
+
+    if(x < Gui::slot_width + Gui::scroll_width)
     {
-        if(y < Gui::header_height)return false;
-        if(x >= cam.width - Gui::panel_width + Gui::slot_width)return false;
-
-        uint32_t pos = (y - Gui::header_height) / Gui::line_spacing;
-        int slot = pos < sel.mapping.size() ? sel.mapping[pos] : -1;
-        if(sel.slot == slot)return false;
-
-        sel.slot = slot;
-        sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
-        return true;
+        if(x >= Gui::slot_width)return t_slot_scroll;
+        y += sel.slot_scroll;  return t_slots;
     }
 
-    switch(button)
+    return t_none;  // TODO
+}
+
+bool Representation::mouse_wheel(int delta)
+{
+    int x, y;
+    SDL_GetMouseState(&x, &y);
+    switch(hit_test(x, y))
     {
-    case SDL_BUTTON_LEFT:  move = true;  return false;
-    case SDL_BUTTON_RIGHT:  return select(x, y);
+    case t_field:
+        cam.rescale(delta);  return true;
+
+    case t_slots:  case t_slot_scroll:
+        sel.update_scroll(cam, -4 * delta * Gui::line_spacing);  return true;
+
+    default:
+        return false;
+    }
+}
+
+bool Representation::mouse_down(int x, int y, uint8_t button)
+{
+    HitTest test = hit_test(x, y);
+    if(button == SDL_BUTTON_LEFT)switch(test)
+    {
+    case t_field:
+        return select(x, y);
+
+    case t_slots:
+        {
+            unsigned pos = y / Gui::line_spacing;
+            int slot = pos < sel.mapping.size() ? sel.mapping[pos] : -1;
+            if(sel.slot == slot)return false;
+
+            sel.slot = slot;
+            sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
+            return true;
+        }
+
+    case t_slot_scroll:
+        move = t_slot_scroll;  break;
+
+    default:
+        return false;
+    }
+    else if(button == SDL_BUTTON_RIGHT)switch(test)
+    {
+    case t_field:
+    case t_slots:
+        move = test;  break;
+
+    default:
+        return false;
+    }
+    else return false;
+
+    SDL_CaptureMouse(SDL_TRUE);  return false;
+}
+
+bool Representation::mouse_move(int dx, int dy)
+{
+    switch(move)
+    {
+    case t_field:  cam.move(dx, dy);  return true;
+    case t_slots:  sel.update_scroll(cam, -dy);  return true;
+    case t_slot_scroll:  sel.drag_scroll(cam, dy);  return true;
     default:  return false;
     }
 }
 
-bool Representation::mouse_move(int32_t dx, int32_t dy)
-{
-    if(!move)return false;  cam.move(dx, dy);  return true;
-}
-
 bool Representation::mouse_up(uint8_t button)
 {
-    if(button == SDL_BUTTON_LEFT)move = false;  return false;
+    if(!move)return false;
+    uint8_t test = (move == t_slot_scroll ? SDL_BUTTON_LEFT : SDL_BUTTON_RIGHT);
+    if(button != test)return false;
+
+    SDL_CaptureMouse(SDL_FALSE);  move = t_none;  return false;
 }
 
 
@@ -888,12 +980,12 @@ bool Representation::select(int32_t x, int32_t y)
     uint64_t x0 = cam.x + std::lround(x * cam.scale);
     uint64_t y0 = cam.y + std::lround(y * cam.scale);
     uint32_t rad = std::min<long>(tile_size, world.config.base_radius + std::lround(click_zone * cam.scale));
-    sel.cr = hit_test(world, x0, y0, rad, sel.id);
+    sel.cr = ::hit_test(world, x0, y0, rad, sel.id);
     if(!sel.cr)
     {
         if(sel.id == uint64_t(-1))return false;
 
-        sel.id = uint64_t(-1);  sel.slot = -1;
+        sel.id = uint64_t(-1);  sel.slot = -1;  sel.slot_scroll = 0;
         sel.fill_sel_bufs(buf[inst_back], buf[inst_gui], obj_count[pass_back], obj_count[pass_gui]);
         sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
         sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
@@ -901,7 +993,7 @@ bool Representation::select(int32_t x, int32_t y)
     }
     if(sel.cr->id == sel.id)return false;
 
-    sel.id = sel.cr->id;  sel.pos = sel.cr->pos;  sel.slot = -1;
+    sel.id = sel.cr->id;  sel.slot = -1;  sel.slot_scroll = 0;  sel.pos = sel.cr->pos;
     sel.proc.process(world.config, sel.cr->genome);  Creature::calc_mapping(sel.proc, sel.input_mapping);
     sel.fill_sel_bufs(buf[inst_back], buf[inst_gui], obj_count[pass_back], obj_count[pass_gui]);
     sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
@@ -1009,11 +1101,15 @@ void Representation::draw()
     }
 
 
+    if(cam.height < Gui::header_height + 2 * Gui::panel_border)return;
+
+
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     mul_x = 2.0 / cam.width;  mul_y = 2.0 / cam.height;
+
     x0 = 1 - Gui::panel_width * mul_x;
-    y0 = 1 - Gui::header_height * mul_y;
+    y0 = 1 - (Gui::header_height - sel.slot_scroll) * mul_y;
 
     glEnable(GL_SCISSOR_TEST);
     glScissor(cam.width - Gui::panel_width, 0, Gui::slot_width, cam.height - Gui::header_height);
@@ -1037,7 +1133,16 @@ void Representation::draw()
     glDisable(GL_SCISSOR_TEST);
 
     glUseProgram(prog[prog_panel]);  glBindVertexArray(arr[pass_panel]);
-    glUniform4f(i_transform[prog_panel], x0, 1, mul_x, -mul_y);
-    glUniform1f(i_panel, cam.height);  glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_panel);
+    glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_panel);
+    glUniform4f(i_transform[prog_panel], x0, 1, mul_x, -mul_y);  glUniform1f(i_panel, cam.height);
     glDrawElements(GL_TRIANGLE_STRIP, elem_count[pass_panel], GL_UNSIGNED_BYTE, nullptr);
+
+    double scroll = cam.height - Gui::header_height - 2 * Gui::panel_border;
+    scroll /= std::max(cam.height - Gui::header_height, int(sel.mapping.size() + 1) * Gui::line_spacing);
+
+    x0 = 1 - (Gui::panel_width - Gui::slot_width) * mul_x;
+    y0 = 1 - (Gui::header_height + sel.slot_scroll * scroll) * mul_y;
+    glUniform4f(i_transform[prog_panel], x0, y0, mul_x, -mul_y);
+    glUniform1f(i_panel, (cam.height - Gui::header_height) * scroll);
+    glDrawElements(GL_TRIANGLE_STRIP, obj_count[pass_panel], GL_UNSIGNED_BYTE, reinterpret_cast<void *>(elem_count[pass_panel]));
 }
