@@ -50,14 +50,17 @@ class Representation
 
     enum Pass
     {
-        pass_food, pass_creature, pass_back, pass_gui, pass_level, pass_link, pass_panel, pass_count
+        pass_food, pass_creature, pass_slot_bg, pass_gene_bg,
+        pass_slot, pass_level, pass_link, pass_gene, pass_panel,
+        pass_count, pass_field_end = pass_slot_bg
     };
 
     enum Buffer
     {
         vtx_food, inst_food, idx_food,
         vtx_creature, inst_creature, idx_creature,
-        vtx_quad, inst_back, inst_gui, inst_level, inst_link,
+        vtx_quad, inst_slot_bg, inst_gene_bg,
+        inst_slot, inst_level, inst_link, inst_gene,
         vtx_panel, idx_panel,
         buf_count
     };
@@ -72,7 +75,13 @@ class Representation
 
     enum HitTest
     {
-        t_none, t_field, t_header, t_slots, t_slot_scroll
+        t_none, t_field, t_header, t_slots, t_genes, t_slot_scroll, t_gene_scroll,
+        t_scroll = t_slot_scroll
+    };
+
+    enum List
+    {
+        l_slot, l_gene, list_count
     };
 
     struct Selection
@@ -80,20 +89,22 @@ class Representation
         uint64_t id;
         const Creature *cr;
         GenomeProcessor proc;
-        std::vector<uint32_t> mapping, refs;
-        std::vector<uint32_t> input_mapping;
-        int slot, slot_scroll;
+        std::vector<uint32_t> mapping[list_count];
+        std::vector<uint32_t> input_mapping, refs;
+        int slot, scroll[list_count];
         bool skip_unused;
         Position pos;
 
-        Selection() : id(-1), cr(nullptr), slot(-1), slot_scroll(0), skip_unused(false)
+        Selection() : id(-1), cr(nullptr), skip_unused(false)
         {
         }
 
-        void update_scroll(const Camera &cam, int delta);
-        void drag_scroll(const Camera &cam, int delta);
+        void update_scroll(const Camera &cam, List list, int delta);
+        void drag_scroll(const Camera &cam, List list, int delta);
 
-        void fill_sel_bufs(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
+        void fill_sel_genes(const Config &config,
+            GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
+        void fill_sel_slots(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
         void fill_sel_levels(GLuint buf, size_t &size);
         void fill_sel_links(GLuint buf, size_t &size);
     };
@@ -111,12 +122,14 @@ class Representation
     Selection sel;
 
 
-    HitTest hit_test(int &x, int &y);
-
+    void fill_sel_bufs();
     void make_food_shape();
     void make_creature_shape();
     void make_quad_shape();
     void make_panel();
+
+    HitTest hit_test(int &x, int &y);
+    bool select_slot(List list, int y);
 
 public:
     explicit Representation(const World &world, SDL_Window *window);
