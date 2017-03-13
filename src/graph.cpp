@@ -583,17 +583,18 @@ Representation::~Representation()
 }
 
 
-void Representation::Selection::update_scroll(const Camera &cam, List list, int delta)
+void Representation::Selection::set_scroll(const Camera &cam, List list, int pos)
 {
-    int max_scroll = int(mapping[list].size() + 1) * Gui::line_spacing - cam.height + Gui::header_height;
-    scroll[list] = std::max(0, std::min(max_scroll, scroll[list] + delta));
+    int list_height = cam.height - Gui::header_height;
+    int max_scroll = int(mapping[list].size() + 1) * Gui::line_spacing - list_height;
+    scroll[list] = std::max(0, std::min(max_scroll, pos));
 }
 
-void Representation::Selection::drag_scroll(const Camera &cam, List list, int delta)
+void Representation::Selection::drag_scroll(const Camera &cam, List list, int base, int offs)
 {
     int gap = cam.height - Gui::header_height - 2 * Gui::panel_border;  if(gap <= 0)return;
-    double scale = int(mapping[list].size() + 1) * Gui::line_spacing / gap;
-    update_scroll(cam, list, std::lround(delta * scale));
+    double scale = int(mapping[list].size() + 1) * Gui::line_spacing / double(gap);
+    set_scroll(cam, list, base + std::lround(offs * scale));
 }
 
 
@@ -634,30 +635,31 @@ bool Representation::select_slot(List list, int y)
     return true;
 }
 
-bool Representation::mouse_wheel(int delta)
+bool Representation::mouse_wheel(const SDL_MouseWheelEvent &evt)
 {
     int x, y;
     SDL_GetMouseState(&x, &y);
     switch(hit_test(x, y))
     {
     case t_field:
-        cam.rescale(delta);  return true;
+        cam.rescale(evt.y);  return true;
 
     case t_slots:  case t_slot_scroll:
-        sel.update_scroll(cam, l_slot, -4 * delta * Gui::line_spacing);  return true;
+        sel.set_scroll(cam, l_slot, sel.scroll[l_slot] - 4 * Gui::line_spacing * evt.y);  return true;
 
     case t_genes:  case t_gene_scroll:
-        sel.update_scroll(cam, l_gene, -4 * delta * Gui::line_spacing);  return true;
+        sel.set_scroll(cam, l_gene, sel.scroll[l_slot] - 4 * Gui::line_spacing * evt.y);  return true;
 
     default:
         return false;
     }
 }
 
-bool Representation::mouse_down(int x, int y, uint8_t button)
+bool Representation::mouse_down(const SDL_MouseButtonEvent &evt)
 {
+    int x = evt.x, y = evt.y;
     HitTest test = hit_test(x, y);
-    if(button == SDL_BUTTON_LEFT)switch(test)
+    if(evt.button == SDL_BUTTON_LEFT)switch(test)
     {
     case t_field:
         return select(x, y);
@@ -666,23 +668,31 @@ bool Representation::mouse_down(int x, int y, uint8_t button)
         return select_slot(l_slot, y);
 
     case t_slot_scroll:
-        move = t_slot_scroll;  break;
+        scroll_base = sel.scroll[l_slot];
+        mouse_start = evt.y;  move = t_slot_scroll;  break;
 
     case t_genes:
         return select_slot(l_gene, y);
 
     case t_gene_scroll:
-        move = t_gene_scroll;  break;
+        scroll_base = sel.scroll[l_gene];
+        mouse_start = evt.y;  move = t_gene_scroll;  break;
 
     default:
         return false;
     }
-    else if(button == SDL_BUTTON_RIGHT)switch(test)
+    else if(evt.button == SDL_BUTTON_RIGHT)switch(test)
     {
     case t_field:
+        move = t_field;  break;
+
     case t_slots:
+        scroll_base = sel.scroll[l_slot];
+        mouse_start = evt.y;  move = t_slots;  break;
+
     case t_genes:
-        move = test;  break;
+        scroll_base = sel.scroll[l_gene];
+        mouse_start = evt.y;  move = t_genes;  break;
 
     default:
         return false;
@@ -692,24 +702,24 @@ bool Representation::mouse_down(int x, int y, uint8_t button)
     SDL_CaptureMouse(SDL_TRUE);  return false;
 }
 
-bool Representation::mouse_move(int dx, int dy)
+bool Representation::mouse_move(const SDL_MouseMotionEvent &evt)
 {
     switch(move)
     {
-    case t_field:  cam.move(dx, dy);  return true;
-    case t_slots:  sel.update_scroll(cam, l_slot, -dy);  return true;
-    case t_slot_scroll:  sel.drag_scroll(cam, l_slot, dy);  return true;
-    case t_genes:  sel.update_scroll(cam, l_gene, -dy);  return true;
-    case t_gene_scroll:  sel.drag_scroll(cam, l_gene, dy);  return true;
+    case t_field:  cam.move(evt.xrel, evt.yrel);  return true;
+    case t_slots:  sel.set_scroll(cam, l_slot, scroll_base + mouse_start - evt.y);  return true;
+    case t_slot_scroll:  sel.drag_scroll(cam, l_slot, scroll_base, evt.y - mouse_start);  return true;
+    case t_genes:  sel.set_scroll(cam, l_gene, scroll_base + mouse_start - evt.y);  return true;
+    case t_gene_scroll:  sel.drag_scroll(cam, l_gene, scroll_base, evt.y - mouse_start);  return true;
     default:  return false;
     }
 }
 
-bool Representation::mouse_up(uint8_t button)
+bool Representation::mouse_up(const SDL_MouseButtonEvent &evt)
 {
     if(!move)return false;
     uint8_t test = (move >= t_scroll ? SDL_BUTTON_LEFT : SDL_BUTTON_RIGHT);
-    if(button != test)return false;
+    if(evt.button != test)return false;
 
     SDL_CaptureMouse(SDL_FALSE);  move = t_none;  return false;
 }

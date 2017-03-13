@@ -89,19 +89,19 @@ bool main_loop(SDL_Window *window, char **args, int n)
         switch(evt.type)
         {
         case SDL_MOUSEBUTTONDOWN:
-            if(graph.mouse_down(evt.button.x, evt.button.y, evt.button.button))break;
+            if(graph.mouse_down(evt.button))break;
             continue;
 
         case SDL_MOUSEMOTION:
-            if(graph.mouse_move(evt.motion.xrel, evt.motion.yrel))break;
+            if(graph.mouse_move(evt.motion))break;
             continue;
 
         case SDL_MOUSEBUTTONUP:
-            if(graph.mouse_up(evt.button.button))break;
+            if(graph.mouse_up(evt.button))break;
             continue;
 
         case SDL_MOUSEWHEEL:
-            if(graph.mouse_wheel(evt.wheel.y))break;
+            if(graph.mouse_wheel(evt.wheel))break;
             continue;
 
         case SDL_WINDOWEVENT:

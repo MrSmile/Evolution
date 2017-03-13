@@ -99,8 +99,8 @@ class Representation
         {
         }
 
-        void update_scroll(const Camera &cam, List list, int delta);
-        void drag_scroll(const Camera &cam, List list, int delta);
+        void set_scroll(const Camera &cam, List list, int pos);
+        void drag_scroll(const Camera &cam, List list, int base, int offs);
 
         void fill_sel_genes(const Config &config,
             GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
@@ -119,6 +119,7 @@ class Representation
     GLuint arr[pass_count], buf[buf_count];
     size_t elem_count[pass_count];
     size_t obj_count[pass_count];
+    int scroll_base, mouse_start;
     Selection sel;
 
 
@@ -136,10 +137,10 @@ public:
     ~Representation();
 
     void resize(int w, int h);
-    bool mouse_wheel(int delta);
-    bool mouse_down(int x, int y, uint8_t button);
-    bool mouse_move(int dx, int dy);
-    bool mouse_up(uint8_t button);
+    bool mouse_wheel(const SDL_MouseWheelEvent &evt);
+    bool mouse_down(const SDL_MouseButtonEvent &evt);
+    bool mouse_move(const SDL_MouseMotionEvent &evt);
+    bool mouse_up(const SDL_MouseButtonEvent &evt);
 
     bool select(int x, int y);
     void update(SDL_Window *window, bool checksum);
