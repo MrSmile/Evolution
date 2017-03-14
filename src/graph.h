@@ -51,7 +51,7 @@ class Representation
     enum Pass
     {
         pass_food, pass_creature, pass_slot_bg, pass_gene_bg,
-        pass_slot, pass_level, pass_link, pass_gene, pass_panel,
+        pass_slot, pass_level, pass_link, pass_gene, pass_header, pass_panel,
         pass_count, pass_field_end = pass_slot_bg
     };
 
@@ -60,7 +60,7 @@ class Representation
         vtx_food, inst_food, idx_food,
         vtx_creature, inst_creature, idx_creature,
         vtx_quad, inst_slot_bg, inst_gene_bg,
-        inst_slot, inst_level, inst_link, inst_gene,
+        inst_slot, inst_level, inst_link, inst_gene, inst_header,
         vtx_panel, idx_panel,
         buf_count
     };
@@ -75,7 +75,7 @@ class Representation
 
     enum HitTest
     {
-        t_none, t_field, t_header, t_slots, t_genes, t_slot_scroll, t_gene_scroll,
+        t_none, t_field, t_show_all, t_slots, t_genes, t_slot_scroll, t_gene_scroll,
         t_scroll = t_slot_scroll
     };
 
@@ -95,7 +95,7 @@ class Representation
         bool skip_unused;
         Position pos;
 
-        Selection() : id(-1), cr(nullptr), skip_unused(false)
+        Selection() : id(-1), cr(nullptr), skip_unused(true)
         {
         }
 
@@ -104,6 +104,7 @@ class Representation
 
         void fill_sel_genes(const Config &config,
             GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
+        void fill_sel_header(GLuint buf_gui, size_t &size_gui);
         void fill_sel_slots(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
         void fill_sel_levels(GLuint buf, size_t &size);
         void fill_sel_links(GLuint buf, size_t &size);

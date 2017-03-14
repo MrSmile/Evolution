@@ -235,6 +235,7 @@ public:
     std::vector<SlotData> slots;
     std::vector<LinkData> links;
     Config::SlotCost passive_cost;
+    uint32_t max_energy, max_life;
     uint32_t count[Slot::invalid];
 
 

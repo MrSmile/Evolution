@@ -630,12 +630,18 @@ void GenomeProcessor::process(const Config &config, const Genome &genome)
     update(config, genome);  finalize();
     passive_cost.initial  = genome.genes.size() * config.gene_init_cost;
     passive_cost.per_tick = genome.genes.size() * config.gene_pass_rate;
-    std::memset(count, 0, sizeof(count));
+    max_energy = max_life = 0;  std::memset(count, 0, sizeof(count));
     for(const auto &slot : slots)
     {
         passive_cost.initial  += config.cost[slot.type].initial;
         passive_cost.per_tick += config.cost[slot.type].per_tick;
-        if(slot.type == Slot::hide)passive_cost.initial += slot.base * config.hide_mul;
+        if(slot.type == Slot::stomach)
+            max_energy += slot.base * config.capacity_mul;
+        else if(slot.type == Slot::hide)
+        {
+            passive_cost.initial += slot.base * config.hide_mul;
+            max_life += slot.base * config.life_mul;
+        }
         if(slot.used)count[slot.type]++;
     }
 }
@@ -723,12 +729,10 @@ Slot::Type Creature::append_slot(const Config &config, const GenomeProcessor::Sl
         signals.emplace_back(config, slot);  return Slot::signal;
 
     case Slot::stomach:
-        stomachs.emplace_back(config, slot);
-        max_energy += stomachs.rbegin()->capacity;  break;
+        stomachs.emplace_back(config, slot);  break;
 
     case Slot::hide:
-        hides.emplace_back(config, slot);
-        max_life += hides.rbegin()->max_life;  break;
+        hides.emplace_back(config, slot);  break;
 
     case Slot::eye:
         eyes.emplace_back(config, slot);  break;
@@ -778,9 +782,9 @@ void Creature::calc_mapping(const GenomeProcessor &proc, std::vector<uint32_t> &
 
 Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &proc,
     uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy) :
-    id(id), genome(std::move(genome)), pos(pos), angle(angle),
-    passive_energy(proc.passive_cost.initial), max_energy(0),
-    passive_cost(proc.passive_cost.per_tick), max_life(0),
+    id(id), genome(std::move(genome)), pos(pos), angle(angle), passive_energy(proc.passive_cost.initial),
+    energy(std::min(spawn_energy - proc.passive_cost.initial, proc.max_energy)), max_energy(proc.max_energy),
+    passive_cost(proc.passive_cost.per_tick), total_life(proc.max_life), max_life(proc.max_life),
     damage(0), father(config.base_r2), flags(f_creature)
 {
     uint32_t offset[Slot::invalid], n = 0;
@@ -809,8 +813,6 @@ Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &
         if(index < neirons.size())order.push_back(index);
     }
     assert(order.size() == neirons.size());
-    energy = std::min(spawn_energy - proc.passive_cost.initial, max_energy);
-    total_life = max_life;
 
     assert(wombs.size()    == proc.count[Slot::womb]);
     assert(claws.size()    == proc.count[Slot::claw]);

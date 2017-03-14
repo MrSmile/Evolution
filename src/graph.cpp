@@ -16,19 +16,22 @@ namespace Gui
     constexpr uint32_t back_header = 0xDD000033;
     constexpr uint32_t back_filler = 0xDD000000;
 
-    constexpr int panel_border  =  8;
-    constexpr int panel_stretch =  8;
-    constexpr int scroll_width  = 16;
-    constexpr int header_height = 64;
+    constexpr int panel_border  =   8;
+    constexpr int panel_stretch =   8;
+    constexpr int sel_icon_size =  48;
+    constexpr int sel_all_width =  72;
+    constexpr int bar_width     = 256;
+    constexpr int header_height =  64;
+    constexpr int scroll_width  =  16;
 
-    constexpr int margin        =  4;
-    constexpr int spacing       =  8;
-    constexpr int digit_width   =  8;
-    constexpr int icon_width    = 16;
-    constexpr int line_height   = 16;
-    constexpr int flag_pos      = 16;
-    constexpr int flag_width    =  8;
-    constexpr int flag_height   =  8;
+    constexpr int margin        =   4;
+    constexpr int spacing       =   8;
+    constexpr int digit_width   =   8;
+    constexpr int icon_width    =  16;
+    constexpr int line_height   =  16;
+    constexpr int flag_pos      =  16;
+    constexpr int flag_width    =   8;
+    constexpr int flag_height   =   8;
 
     constexpr unsigned icon_offset  = 8;
     constexpr unsigned icon_row     = 4;
@@ -44,6 +47,9 @@ namespace Gui
     constexpr int gene_offs = margin + 3 * digit_width;
 
     constexpr int panel_width = slot_width + gene_width + 2 * scroll_width;
+    constexpr int control_height = line_height + 2 * panel_border;
+    constexpr int sel_all_offs_x = sel_icon_size + bar_width + 4 * panel_border;
+    constexpr int sel_all_offs_y = margin + line_spacing;
 
 
     enum Icon
@@ -87,8 +93,21 @@ namespace Gui
         l_end_dn = 9, l_end_up = 10, l_end_mid = 12
     };
 
-    constexpr int scroll_pos_x = 104;
-    constexpr int scroll_pos_y =   8;
+    constexpr int mark_pos_x =      64;
+    constexpr int mark_pos_y =      16;
+    constexpr int slash_pos_x =     80;
+    constexpr int slash_pos_y =     16;
+
+    constexpr int sel_icon_pos_x =   0;
+    constexpr int sel_icon_pos_y =  64;
+    constexpr int sel_all_pos_x  =  56;
+    constexpr int sel_all_pos_y  =  64;
+    constexpr int sel_bar1_pos_x =  48;
+    constexpr int sel_bar1_pos_y =  96;
+    constexpr int sel_bar2_pos_x =  88;
+    constexpr int sel_bar2_pos_y =  96;
+    constexpr int scroll_pos_x   = 104;
+    constexpr int scroll_pos_y   =   8;
 }
 
 
@@ -222,6 +241,12 @@ struct PanelVertex
     GLshort x, y;
     GLushort stretch;
     GLubyte tx, ty;
+
+    PanelVertex() = default;
+
+    PanelVertex(GLshort x, GLshort y, GLubyte tx, GLubyte ty) : x(x), y(y), stretch(0), tx(tx), ty(ty)
+    {
+    }
 };
 
 
@@ -310,6 +335,7 @@ const Representation::PassInfo Representation::pass_info[] =
     INFO(gui,      vtx_quad,     inst_level,    buf_count),
     INFO(gui,      vtx_quad,     inst_link,     buf_count),
     INFO(gui,      vtx_quad,     inst_gene,     buf_count),
+    INFO(gui,      vtx_quad,     inst_header,   buf_count),
     INFO(panel,    vtx_panel,    buf_count,     idx_panel),
 };
 
@@ -348,6 +374,7 @@ void Representation::fill_sel_bufs()
 
     sel.fill_sel_genes(world.config,
         buf[inst_gene_bg], buf[inst_gene], obj_count[pass_gene_bg], obj_count[pass_gene]);
+    sel.fill_sel_header(buf[inst_header], obj_count[pass_header]);
     sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], obj_count[pass_slot_bg], obj_count[pass_slot]);
     sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
     sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
@@ -410,7 +437,8 @@ void Representation::make_creature_shape()
 void Representation::make_quad_shape()
 {
     elem_count[pass_slot_bg] = elem_count[pass_gene_bg] = 4;
-    elem_count[pass_slot] = elem_count[pass_level] = elem_count[pass_link] = elem_count[pass_gene] = 4;
+    elem_count[pass_slot] = elem_count[pass_level] = elem_count[pass_link] = 4;
+    elem_count[pass_gene] = elem_count[pass_header] = 4;
 
     Vertex vertex[4] =
     {
@@ -430,6 +458,16 @@ void put_coords(GLshort *pos, GLubyte *tex, int &index, int width, bool stretch 
     index++;
 }
 
+void put_quad(PanelVertex *vertex, int x, int y, int tx, int ty, int width, int height)
+{
+    *vertex++ = PanelVertex(x, y, tx, ty);
+    *vertex++ = PanelVertex(x, y + height, tx, ty + height);
+
+    x += width;  tx += width;
+    *vertex++ = PanelVertex(x, y, tx, ty);
+    *vertex++ = PanelVertex(x, y + height, tx, ty + height);
+}
+
 void put_strip(GLubyte *buf, int &index, GLubyte base, GLubyte n, int flags)
 {
     for(GLubyte i = 0; i < n; i++)
@@ -446,14 +484,14 @@ void put_strip(GLubyte *buf, int &index, GLubyte base, GLubyte n)
 
 void Representation::make_panel()
 {
-    constexpr int nx = 6, ny = 6, ns = 4;
-    constexpr int m = (2 * nx + 1) * (ny - 1) + 1;
+    constexpr int nx = 6, ny = 6, nb = 4, ns = 4;
+    constexpr int m = (2 * nx + 1) * (ny - 1) + 4 * nb + 13;
     elem_count[pass_panel] = m;
     obj_count[pass_panel] = 2 * ns;
 
     int index;
-    GLshort  x[nx],  y[ny],  s[ns];
-    GLubyte tx[nx], ty[ny], ts[ns];
+    GLshort  x[nx],  y[ny],  b[nb],  s[ns];
+    GLubyte tx[nx], ty[ny], tb[nb], ts[ns];
 
     x[0] = -Gui::panel_border;  tx[0] = 0;  index = 1;
     put_coords(x, tx, index, 2 * Gui::panel_border);
@@ -471,13 +509,20 @@ void Representation::make_panel()
     put_coords(y, ty, index, Gui::panel_border);
     assert(index == ny);
 
+    b[0] = Gui::sel_icon_size + Gui::panel_border;
+    tb[0] = Gui::sel_bar1_pos_x;  index = 1;
+    put_coords(b, tb, index, 2 * Gui::panel_border);
+    put_coords(b, tb, index, Gui::bar_width - 2 * Gui::panel_border, true);
+    put_coords(b, tb, index, 2 * Gui::panel_border);
+    assert(index == nb);
+
     s[0] = 0;  ts[0] = Gui::scroll_pos_y;  index = 1;
     put_coords(s, ts, index, Gui::panel_border);
     put_coords(s, ts, index, 0, true);
     put_coords(s, ts, index, Gui::panel_border);
     assert(index == ns);
 
-    PanelVertex vertex[nx * ny + 2 * ns];
+    PanelVertex vertex[nx * ny + 4 * nb + 2 * ns + 8];
     for(int i = 0, k = 0; i < ny; i++)for(int j = 0; j < nx; j++, k++)
     {
         vertex[k].x = x[j];  vertex[k].tx = tx[j];
@@ -486,6 +531,28 @@ void Representation::make_panel()
     }
 
     index = nx * ny;
+    for(int k = 0; k < 2; k++)for(int i = 0; i < nb; i++, index += 2)
+    {
+        vertex[index].x  = vertex[index + 1].x  = b[i];
+        vertex[index].tx = vertex[index + 1].tx = tb[i];
+
+        vertex[index].y = Gui::margin + k * Gui::line_spacing;
+        vertex[index].ty = Gui::sel_bar1_pos_y;
+
+        vertex[index + 1].y  = vertex[index].y  + Gui::control_height;
+        vertex[index + 1].ty = vertex[index].ty + Gui::control_height;
+
+        vertex[index].stretch = vertex[index + 1].stretch = 0;
+    }
+
+    put_quad(vertex + index, Gui::panel_border, Gui::panel_border,
+        Gui::sel_icon_pos_x, Gui::sel_icon_pos_y, Gui::sel_icon_size, Gui::sel_icon_size);
+    index += 4;
+
+    put_quad(vertex + index, Gui::sel_all_offs_x, Gui::sel_all_offs_y,
+        Gui::sel_all_pos_x, Gui::sel_all_pos_y, Gui::sel_all_width, Gui::control_height);
+    index += 4;
+
     for(int i = 0; i < ns; i++, index += 2)
     {
         vertex[index + 1].x = 0;  vertex[index + 1].tx = Gui::scroll_pos_x;
@@ -502,10 +569,21 @@ void Representation::make_panel()
     put_strip(strip, index, 1 * nx, nx);
     put_strip(strip, index, 2 * nx, nx);
     put_strip(strip, index, 3 * nx, nx, 0x2A);
-    put_strip(strip, index, 4 * nx, nx, 0);
-    assert(index == m);
+    put_strip(strip, index, 4 * nx, nx);
 
-    for(int i = 0; i < 2 * ns; i++)strip[index + i] = nx * ny + i;
+    int offs = nx * ny;
+    for(int i = 0; i < 2 * nb; i++)strip[index++] = offs + i;
+    strip[index++] = GLubyte(-1);  offs += 2 * nb;
+
+    for(int i = 0; i < 2 * nb; i++)strip[index++] = offs + i;
+    strip[index++] = GLubyte(-1);  offs += 2 * nb;
+
+    for(int i = 0; i < 4; i++)strip[index++] = offs + i;
+    strip[index++] = GLubyte(-1);  offs += 4;
+    for(int i = 0; i < 4; i++)strip[index++] = offs + i;
+    assert(index == m);  offs += 4;
+
+    for(int i = 0; i < 2 * ns; i++)strip[index++] = offs + i;
 
     glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_panel]);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
@@ -540,7 +618,8 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
 
     prog[prog_panel] = create_program(Shader::panel);
     i_transform[prog_panel] = glGetUniformLocation(prog[prog_panel], "transform");
-    i_panel = glGetUniformLocation(prog[prog_panel], "height");
+    i_size = glGetUniformLocation(prog[prog_panel], "height");
+    i_panel = glGetUniformLocation(prog[prog_panel], "panel");
 
 
     glGenVertexArrays(pass_count, arr);
@@ -601,7 +680,14 @@ Representation::HitTest Representation::hit_test(int &x, int &y)
     if(x < cam.width - Gui::panel_width)return t_field;
     x -= cam.width - Gui::panel_width;
 
-    if(y < Gui::header_height)return t_header;
+    if(y < Gui::header_height)
+    {
+        if(x < Gui::sel_all_offs_x || y < Gui::sel_all_offs_y)return t_none;
+        x -= Gui::sel_all_offs_x;  y -= Gui::sel_all_offs_y;
+
+        if(x < Gui::control_height && y < Gui::sel_all_width)return t_show_all;
+        return t_none;
+    }
     y -= Gui::header_height;
 
     if(x < Gui::slot_width + Gui::scroll_width)
@@ -656,6 +742,15 @@ bool Representation::mouse_down(const SDL_MouseButtonEvent &evt)
     {
     case t_field:
         return select(x, y);
+
+    case t_show_all:
+        sel.skip_unused = !sel.skip_unused;
+        sel.fill_sel_header(buf[inst_header], obj_count[pass_header]);
+        sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], obj_count[pass_slot_bg], obj_count[pass_slot]);
+        sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
+        sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
+        sel.set_scroll(cam, l_slot, sel.scroll[l_slot]);
+        return true;
 
     case t_slots:
         return select_slot(l_slot, y);
@@ -727,6 +822,22 @@ int write_number(std::vector<GuiQuad> &buf, int x, int y, uint32_t num)
         buf.emplace_back(x, y, tx, 0, Gui::digit_width, Gui::line_height);
     }
     while(num);  return x;
+}
+
+void write_number_right(std::vector<GuiQuad> &buf, int x, int y, uint32_t num)
+{
+    size_t pos = buf.size();
+    int offs = x - write_number(buf, 0, y, num);
+    for(; pos < buf.size(); pos++)buf[pos].x += offs;
+}
+
+void put_number_pair(std::vector<GuiQuad> &buf, int x, int y, uint32_t num1, uint32_t num2)
+{
+    x -= Gui::icon_width / 2;
+    if(num1 != uint32_t(-1))write_number(buf, x, y, num1);
+    else buf.emplace_back(x - Gui::digit_width, y, 10 * Gui::digit_width, 0, Gui::digit_width, Gui::line_height);
+    buf.emplace_back(x, y, Gui::slash_pos_x, Gui::slash_pos_y, Gui::icon_width, Gui::line_height);
+    write_number_right(buf, x + Gui::icon_width, y, num2);
 }
 
 void put_icon(std::vector<GuiQuad> &buf, int x, int y, unsigned index)
@@ -909,6 +1020,33 @@ void Representation::Selection::fill_sel_genes(const Config &config,
     size_gui = data_gui.size();
 }
 
+void Representation::Selection::fill_sel_header(GLuint buf_gui, size_t &size_gui)
+{
+    std::vector<GuiQuad> data_gui;
+    data_gui.reserve(54);
+
+    int x1 = Gui::sel_icon_size + 2 * Gui::panel_border + Gui::bar_width / 2;
+    int x2 = Gui::sel_all_offs_x + Gui::panel_border;
+    int y1 = Gui::margin + Gui::panel_border;
+    int y2 = y1 + Gui::line_spacing;
+
+    if(id != uint64_t(-1))
+    {
+        put_number_pair(data_gui, x1, y1, cr ? cr->energy : -1, proc.max_energy);
+        put_number_pair(data_gui, x1, y2, cr ? cr->total_life : -1, proc.max_life);
+
+        put_icon(data_gui, x2, y1, Slot::womb);
+        write_number_right(data_gui, x2 + Gui::icon_width, y1, proc.passive_cost.initial);
+    }
+
+    if(!skip_unused)
+        data_gui.emplace_back(x2, y2, Gui::mark_pos_x, Gui::mark_pos_y, Gui::icon_width, Gui::line_height);
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf_gui);
+    glBufferData(GL_ARRAY_BUFFER, data_gui.size() * sizeof(GuiQuad), data_gui.data(), GL_DYNAMIC_DRAW);
+    size_gui = data_gui.size();
+}
+
 void Representation::Selection::fill_sel_slots(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui)
 {
     mapping[l_slot].clear();
@@ -986,7 +1124,7 @@ void Representation::Selection::fill_sel_levels(GLuint buf, size_t &size)
 
     const auto &slots = proc.slots;
     int x = Gui::base_offs - Gui::icon_width, y = Gui::margin;
-    for(size_t i = 0; i < mapping[l_slot].size(); i++, y += Gui::line_spacing)
+    if(cr)for(size_t i = 0; i < mapping[l_slot].size(); i++, y += Gui::line_spacing)
     {
         uint32_t slot = mapping[l_slot][i];
         if(slots[slot].neiro_state > GenomeProcessor::s_input)continue;
@@ -1120,9 +1258,11 @@ void Representation::update(SDL_Window *window, bool checksum)
     assert(food_ptr == food_end);
     assert(creature_ptr == creature_end);
 
+    sel.fill_sel_header(buf[inst_header], obj_count[pass_header]);
+    sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
+
     if(sel.cr)
     {
-        sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
         cam.x += sel.cr->pos.x - sel.pos.x;
         cam.y += sel.cr->pos.y - sel.pos.y;
         sel.pos = sel.cr->pos;
@@ -1234,9 +1374,11 @@ void Representation::draw()
 
     glDisable(GL_SCISSOR_TEST);
 
-    glUseProgram(prog[prog_panel]);  glBindVertexArray(arr[pass_panel]);
+    glUseProgram(prog[prog_panel]);  glUniform1i(i_panel, 0);
     glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_panel);
-    glUniform4f(i_transform[prog_panel], x_slot, 1, mul_x, -mul_y);  glUniform1f(i_panel, cam.height);
+
+    glBindVertexArray(arr[pass_panel]);
+    glUniform4f(i_transform[prog_panel], x_slot, 1, mul_x, -mul_y);  glUniform1f(i_size, cam.height);
     glDrawElements(GL_TRIANGLE_STRIP, elem_count[pass_panel], GL_UNSIGNED_BYTE, nullptr);
     void *scroll_offs = reinterpret_cast<void *>(elem_count[pass_panel]);
 
@@ -1248,7 +1390,14 @@ void Representation::draw()
 
         double x = 1 - scroll_pos[i] * mul_x;
         double y = 1 - (Gui::header_height + sel.scroll[i] * scroll) * mul_y;
-        glUniform4f(i_transform[prog_panel], x, y, mul_x, -mul_y);  glUniform1f(i_panel, list_height * scroll);
+        glUniform4f(i_transform[prog_panel], x, y, mul_x, -mul_y);  glUniform1f(i_size, list_height * scroll);
         glDrawElements(GL_TRIANGLE_STRIP, obj_count[pass_panel], GL_UNSIGNED_BYTE, scroll_offs);
     }
+
+    glUseProgram(prog[prog_gui]);  glUniform1i(i_gui, 0);
+    glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_gui);
+
+    glBindVertexArray(arr[pass_header]);
+    glUniform4f(i_transform[prog_gui], x_slot, 1, mul_x, -mul_y);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_header], obj_count[pass_header]);
 }
