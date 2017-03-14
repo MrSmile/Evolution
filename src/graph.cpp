@@ -75,23 +75,16 @@ namespace Gui
         {i_none,   i_none,  i_none,  i_none,   0},  // invalid
     };
 
-    struct Position
-    {
-        int x, y;
-    };
+    constexpr int link_spacing = 32;
+    constexpr int link_pos_x = 64;
+    constexpr int link_pos_y = (link_spacing - line_spacing) / 2;
+    constexpr unsigned link_row = 4;
 
     enum LinkTypes
     {
-        l_end_up = 1, l_end_dn = 2, l_end_mid = 4,
-        l_beg_up = 8, l_beg_dn, l_br_up, l_br_dn, l_up, l_dn
-    };
-
-    const Position links[] =
-    {
-        {0x30, 0x70}, {0x50, 0x70}, {0x50, 0x50}, {0x40, 0x18},
-        {0x50, 0x10}, {0x50, 0x40}, {0x50, 0x20}, {0x40, 0x50},
-        {0x40, 0x30}, {0x40, 0x70}, {0x40, 0x40}, {0x40, 0x60},
-        {0x60, 0x00}, {0x70, 0x00}
+        l_up = 1, l_beg_up, l_br_up,
+        l_dn = 5, l_beg_dn, l_br_dn,
+        l_end_dn = 9, l_end_up = 10, l_end_mid = 12
     };
 
     constexpr int scroll_pos_x = 104;
@@ -216,9 +209,9 @@ struct GuiBack
 struct GuiQuad
 {
     GLshort x, y;
-    GLushort tx, ty, width, height;
+    GLubyte tx, ty, width, height;
 
-    GuiQuad(GLshort x, GLshort y, GLushort tx, GLushort ty, GLushort width, GLushort height) :
+    GuiQuad(GLshort x, GLshort y, GLubyte tx, GLubyte ty, GLubyte width, GLubyte height) :
         x(x), y(y), tx(tx), ty(ty), width(width), height(height)
     {
     }
@@ -292,7 +285,7 @@ const VertexAttribute layout_gui[] =
 {
     ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
     ATTR(GuiQuad,      x,       2,       GL_SHORT,          f_instance),
-    ATTR(GuiQuad,      tx,      4,       GL_UNSIGNED_SHORT, f_instance),
+    ATTR(GuiQuad,      tx,      4,       GL_UNSIGNED_BYTE,  f_instance),
 };
 const VertexAttribute layout_panel[] =
 {
@@ -769,75 +762,60 @@ void put_flags(std::vector<GuiQuad> &buf, int x, int y, unsigned flags, unsigned
     }
 }
 
-int put_link(std::vector<GuiQuad> &buf, int x, int y, size_t &prev, int type1, int type2, int line)
+void put_link(std::vector<GuiQuad> &buf, int x, int y, int &y_prev, unsigned type1, unsigned type2, unsigned line)
 {
-    int type = type1;
-    if(prev != size_t(-1))
+    unsigned type = type1;
+    if(y_prev >= 0)
     {
-        int yy = buf[prev].y + buf[prev].height;  type = type2;
-        buf.emplace_back(x, yy, Gui::links[line].x, Gui::links[line].y, Gui::icon_width, y - yy);
+        type = type2;
+        int tx = Gui::link_pos_x + (line / Gui::link_row) * Gui::icon_width;
+        int ty = Gui::link_pos_y + (line % Gui::link_row) * Gui::link_spacing;
+        for(int pos = y_prev + Gui::line_spacing; pos < y; pos += Gui::line_spacing)
+            buf.emplace_back(x, pos, tx, ty, Gui::icon_width, Gui::line_spacing);
     }
-    prev = buf.size();  assert(type);
-    buf.emplace_back(x, y, Gui::links[type].x, Gui::links[type].y, Gui::icon_width, Gui::line_height);
-    return type;
+    int tx = Gui::link_pos_x + (type / Gui::link_row) * Gui::icon_width;
+    int ty = Gui::link_pos_y + (type % Gui::link_row) * Gui::link_spacing;
+    buf.emplace_back(x, y, tx, ty, Gui::icon_width, Gui::line_spacing);
+    y_prev = y;
 }
 
 struct LinkPainter
 {
     std::vector<GuiQuad> &buf;
-    int x, y;  uint32_t dst;
+    int x, y_dst, y_prev;
 
-    size_t prev;  bool output;  int type;
-
-    LinkPainter(std::vector<GuiQuad> &buf, int x, int y, int dst) :
-        buf(buf), x(x), y(y), dst(dst), prev(-1), output(false)
+    LinkPainter(std::vector<GuiQuad> &buf, int x, int dst) :
+        buf(buf), x(x), y_dst(dst * Gui::line_spacing), y_prev(-1)
     {
     }
 
     void process(uint32_t src, int32_t weight)
     {
-        if(!weight)return;  int yy = y + src * Gui::line_spacing;
-        put_weight(buf, x - Gui::item_width - Gui::icon_width, yy, weight);
-
-        if(src < dst)
+        if(!weight)return;  int y = src * Gui::line_spacing;
+        put_weight(buf, x - Gui::item_width - Gui::icon_width, y + Gui::margin, weight);
+        if(y < y_dst)
         {
-            type = put_link(buf, x, yy, prev, Gui::l_beg_up, Gui::l_br_up, Gui::l_up);
-            return;
+            put_link(buf, x, y, y_prev, Gui::l_beg_up, Gui::l_br_up, Gui::l_up);  return;
         }
-        if(src == dst)
+        if(y == y_dst)
         {
-            output = true;
-            type = put_link(buf, x, yy, prev,
-                Gui::l_end_dn | Gui::l_end_mid, Gui::l_end_up | Gui::l_end_dn | Gui::l_end_mid, Gui::l_up);
-            return;
+            put_link(buf, x, y, y_prev, Gui::l_end_dn | Gui::l_end_mid,
+                Gui::l_end_up | Gui::l_end_dn | Gui::l_end_mid, Gui::l_up);  return;
         }
-        if(!output)
-        {
-            output = true;
-            put_link(buf, x, y + dst * Gui::line_spacing, prev,
-                Gui::l_end_dn, Gui::l_end_up | Gui::l_end_dn, Gui::l_up);
-        }
-        type = put_link(buf, x, yy, prev, 0, Gui::l_br_dn, Gui::l_dn);
+        if(y_prev < y_dst)put_link(buf, x, y_dst, y_prev, Gui::l_end_dn, Gui::l_end_up | Gui::l_end_dn, Gui::l_up);
+        put_link(buf, x, y, y_prev, Gui::l_br_dn, Gui::l_br_dn, Gui::l_dn);
     }
 
     void finalize(uint32_t last, int32_t level)
     {
-        if(!output)
-            type = put_link(buf, x, y + dst * Gui::line_spacing, prev,
-                Gui::l_end_dn, Gui::l_end_up | Gui::l_end_dn, Gui::l_up);
-
-        if(prev == size_t(-1))return;
-        if(level)
+        if(y_prev < y_dst)put_link(buf, x, y_dst, y_prev, Gui::l_end_dn, Gui::l_end_up | Gui::l_end_dn, Gui::l_up);
+        if(!level)
         {
-            int yy = y + last * Gui::line_spacing;
-            put_weight(buf, x - Gui::icon_width, yy, -level);
-            put_link(buf, x, yy, prev, 0, Gui::l_beg_dn, Gui::l_dn);
+            buf[buf.size() - 1].ty -= Gui::link_spacing;  return;
         }
-        else
-        {
-            buf[prev].tx = Gui::links[type - Gui::l_end_dn].x;
-            buf[prev].ty = Gui::links[type - Gui::l_end_dn].y;
-        }
+        int y = last * Gui::line_spacing;
+        put_weight(buf, x - Gui::icon_width, y + Gui::margin, -level);
+        put_link(buf, x, y, y_prev, Gui::l_beg_dn, Gui::l_beg_dn, Gui::l_dn);
     }
 };
 
@@ -1023,9 +1001,8 @@ void Representation::Selection::fill_sel_levels(GLuint buf, size_t &size)
 
 void Representation::Selection::fill_sel_links(GLuint buf, size_t &size)
 {
-    const auto &slots = proc.slots;
-    const auto &links = proc.links;
-    if(slot < 0 || slots[slot].neiro_state == GenomeProcessor::s_input)
+    const auto &slots = proc.slots;  const auto &links = proc.links;
+    if(slot < 0 || slots[slot].neiro_state == GenomeProcessor::s_input || !slots[slot].link_count)
     {
         glBindBuffer(GL_ARRAY_BUFFER, buf);
         glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
@@ -1033,12 +1010,12 @@ void Representation::Selection::fill_sel_links(GLuint buf, size_t &size)
     }
 
     std::vector<GuiQuad> data;
-    uint32_t beg = slots[slot].link_start;
-    uint32_t end = beg + slots[slot].link_count;
+    data.reserve(5 * slots[slot].link_count + mapping[l_slot].size() + 8);
+    uint32_t beg = slots[slot].link_start, end = beg + slots[slot].link_count;
 
     uint32_t cur = links[beg].source;
     int32_t weight = 0, level = slots[slot].act_level;
-    LinkPainter painter(data, Gui::base_offs, Gui::margin, refs[slot]);
+    LinkPainter painter(data, Gui::base_offs, refs[slot]);
     for(uint32_t j = beg; j < end; j++)
     {
         if(links[j].source != cur)
