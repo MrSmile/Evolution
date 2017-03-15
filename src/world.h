@@ -28,7 +28,7 @@ namespace Slot
 }
 
 constexpr uint8_t slot_type_bits = 4;
-constexpr uint8_t flag_bits = 4;
+constexpr uint8_t flag_bits = 6;
 
 typedef uint8_t slot_t;
 
@@ -50,8 +50,7 @@ struct Config
     uint32_t chromosome_copy_prob;
     uint32_t bit_mutate_factor;
 
-    SlotCost cost[Slot::invalid];
-    uint32_t gene_init_cost, gene_pass_rate;
+    SlotCost base_cost, gene_cost, cost[Slot::invalid];
     uint32_t eating_cost, signal_cost;
 
     uint32_t spawn_mul, capacity_mul, hide_mul;
@@ -100,7 +99,7 @@ struct Food
 {
     enum Type
     {
-        Dead, Sprout, Grass, Meat
+        dead, sprout, grass, meat
     };
 
     Type type;
@@ -254,13 +253,13 @@ struct Creature
 {
     enum Flags : uint8_t
     {
-        f_eating   = 1 << 0,
-        f_creature = 1 << 1,
-        f_grass    = 1 << 2,  // 1 << Food::Grass
-        f_meat     = 1 << 3,  // 1 << Food::Meat
-        f_signal1  = 1 << 4,
-        f_signal2  = 1 << 5,
-        f_signal3  = 1 << 6,
+        f_signal1  = 1 << 0,
+        f_signal2  = 1 << 1,
+        f_signal3  = 1 << 2,
+        f_creature = 1 << 3,
+        f_grass    = 1 << 4,
+        f_meat     = 1 << 5,
+        f_eating   = 1 << 6,
 
         f_signals = f_signal1 | f_signal2 | f_signal3,
         f_visible = f_creature | f_grass | f_meat | f_signals

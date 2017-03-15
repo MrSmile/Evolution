@@ -27,9 +27,10 @@ bool Config::calc_derived()
     if(chromosome_replace_factor > 0xFFFFFF00)return false;
     if(bit_mutate_factor > 0xFFFFFF00)return false;
 
-    for(const auto &c : cost)
-        if(c.initial > max_cost || c.per_tick > max_cost)return false;
-    if(gene_init_cost > max_cost || gene_pass_rate > max_cost)return false;
+    if(!base_cost.initial || !base_cost.per_tick)return false;
+    if(base_cost.initial > max_cost || base_cost.per_tick > max_cost)return false;
+    if(gene_cost.initial > max_cost || gene_cost.per_tick > max_cost)return false;
+    for(const auto &c : cost)if(c.initial > max_cost || c.per_tick > max_cost)return false;
     if(eating_cost > max_cost || signal_cost > max_cost)return false;
 
     uint32_t limit = max_value >> base_bits;
@@ -61,8 +62,9 @@ bool Config::load(InStream &stream)
     stream >> genome_split_factor >> chromosome_replace_factor;
     stream >> chromosome_copy_prob >> bit_mutate_factor;
 
+    stream >> base_cost.initial >> base_cost.per_tick;
+    stream >> gene_cost.initial >> gene_cost.per_tick;
     for(auto &c : cost)stream >> c.initial >> c.per_tick;
-    stream >> gene_init_cost >> gene_pass_rate;
     stream >> eating_cost >> signal_cost;
 
     stream >> spawn_mul >> capacity_mul >> hide_mul;
@@ -84,8 +86,9 @@ void Config::save(OutStream &stream) const
     stream << genome_split_factor << chromosome_replace_factor;
     stream << chromosome_copy_prob << bit_mutate_factor;
 
+    stream << base_cost.initial << base_cost.per_tick;
+    stream << gene_cost.initial << gene_cost.per_tick;
     for(auto &c : cost)stream << c.initial << c.per_tick;
-    stream << gene_init_cost << gene_pass_rate;
     stream << eating_cost << signal_cost;
 
     stream << spawn_mul << capacity_mul << hide_mul;
@@ -125,22 +128,22 @@ Food::Food(const Config &config, Type type, const Position &pos) : type(type), p
 {
 }
 
-Food::Food(const Config &config, const Food &food) : Food(config, food.type > Sprout ? food.type : Grass, food.pos)
+Food::Food(const Config &config, const Food &food) : Food(config, food.type > sprout ? food.type : grass, food.pos)
 {
 }
 
 
 void Food::check_grass(const Config &config, const Food *food, size_t n)
 {
-    if(type != Sprout)return;
+    if(type != sprout)return;
 
-    for(size_t i = 0; i < n; i++)if(food[i].type == Grass)
+    for(size_t i = 0; i < n; i++)if(food[i].type == grass)
     {
         int32_t dx = pos.x - food[i].pos.x;
         int32_t dy = pos.y - food[i].pos.y;
         uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
         if(r2 >= config.repression_r2)continue;
-        type = Dead;  return;
+        type = dead;  return;
     }
 }
 
@@ -153,7 +156,7 @@ bool Food::load(const Config &config, InStream &stream, uint64_t offs_x, uint64_
 
     type = Type(x >> tile_order);
     pos.x = x & tile_mask | offs_x;  pos.y = y | offs_y;
-    return type > Dead && type <= Meat && !(y >> tile_order);
+    return type > dead && type <= meat && !(y >> tile_order);
 }
 
 void Food::save(OutStream &stream) const
@@ -628,8 +631,8 @@ void GenomeProcessor::finalize()
 void GenomeProcessor::process(const Config &config, const Genome &genome)
 {
     update(config, genome);  finalize();
-    passive_cost.initial  = genome.genes.size() * config.gene_init_cost;
-    passive_cost.per_tick = genome.genes.size() * config.gene_pass_rate;
+    passive_cost.initial  = config.base_cost.initial  + genome.genes.size() * config.gene_cost.initial;
+    passive_cost.per_tick = config.base_cost.per_tick + genome.genes.size() * config.gene_cost.per_tick;
     max_energy = max_life = 0;  std::memset(count, 0, sizeof(count));
     for(const auto &slot : slots)
     {
@@ -914,7 +917,7 @@ void Creature::process_detectors(Creature *cr1, Creature *cr2)
 
 void Creature::process_food(std::vector<Food> &foods)
 {
-    for(auto &food : foods)if(food.type > Food::Sprout)
+    for(auto &food : foods)if(food.type > Food::sprout)
     {
         int32_t dx = food.pos.x - pos.x;
         int32_t dy = food.pos.y - pos.y;
@@ -922,7 +925,7 @@ void Creature::process_food(std::vector<Food> &foods)
         if(flags & f_eating)food.eater.update(r2, this);
         if(!r2)continue;  // invalid angle
 
-        update_view(1 << food.type, r2, calc_angle(dx, dy) - angle);
+        update_view(food.type == Food::grass ? f_grass : f_meat, r2, calc_angle(dx, dy) - angle);
     }
 }
 
@@ -1091,7 +1094,7 @@ bool World::Tile::load(const Config &config, InStream &stream, uint32_t x, uint3
     for(auto &food : foods)
     {
         if(!food.load(config, stream, offs_x, offs_y))return false;
-        if(food.type > Food::Sprout)total_food++;
+        if(food.type > Food::sprout)total_food++;
     }
 
     for(uint32_t i = 0; i < creature_count; i++)
@@ -1145,11 +1148,11 @@ void World::spawn_grass(Tile &tile, uint32_t x, uint32_t y)
     {
         uint64_t xx = (tile.rand.uint32() & tile_mask) | offs_x;
         uint64_t yy = (tile.rand.uint32() & tile_mask) | offs_y;
-        tile.foods.emplace_back(config, Food::Sprout, Position{xx, yy});
+        tile.foods.emplace_back(config, Food::sprout, Position{xx, yy});
     }
     for(size_t i = 0; i < tile.spawn_start; i++)
     {
-        if(tile.foods[i].type != Food::Grass)continue;
+        if(tile.foods[i].type != Food::grass)continue;
         uint32_t n = tile.rand.poisson(config.exp_sprout_per_grass);
         for(uint32_t k = 0; k < n; k++)
         {
@@ -1159,7 +1162,7 @@ void World::spawn_grass(Tile &tile, uint32_t x, uint32_t y)
             pos.y += r_sin(config.sprout_dist_x4, angle);
             size_t index = tile_index(pos);
 
-            tiles[index].foods.emplace_back(config, Food::Sprout, pos);
+            tiles[index].foods.emplace_back(config, Food::sprout, pos);
         }
     }
 }
@@ -1170,7 +1173,7 @@ void World::spawn_meat(Tile &tile, Position pos, uint32_t energy)
     for(energy -= config.food_energy;;)
     {
         size_t index = tile_index(pos);  total_food_count++;
-        tiles[index].foods.emplace_back(config, Food::Meat, pos);
+        tiles[index].foods.emplace_back(config, Food::meat, pos);
         if(energy < config.food_energy)return;
         energy -= config.food_energy;
 
@@ -1290,23 +1293,24 @@ void World::next_step()
 }
 
 
-const char version_string[] = "Evol0001";
+const char version_string[] = "Evol0002";
 
 void World::init()
 {
     config.order_x = config.order_y = 3;  // 8 x 8
     config.base_radius = tile_size / 64;
 
-    config.chromosome_bits = 6;  // 64 = 32 pair
-    config.genome_split_factor = ~(uint32_t(-1) / 64);
-    config.chromosome_replace_factor = ~(uint32_t(-1) / 64);
+    config.chromosome_bits = 4;  // 16 = 8 pair
+    config.genome_split_factor = ~(uint32_t(-1) / 1024);
+    config.chromosome_replace_factor = ~(uint32_t(-1) / 256);
     config.chromosome_copy_prob = uint32_t(-1) / 2;
     config.bit_mutate_factor = ~(uint32_t(-1) / 1024);
 
-    config.slot_bits = 8;  // 256 slots
+    config.slot_bits = 6;  // 64 slots
     config.base_bits = 8;
-    config.gene_init_cost = 32;
-    config.gene_pass_rate = 0;
+
+    config.base_cost           = { 32, 1};
+    config.gene_cost           = { 32, 0};
 
     config.cost[Slot::womb]    = {256, 1};
     config.cost[Slot::claw]    = {256, 1};
@@ -1320,7 +1324,7 @@ void World::init()
     config.cost[Slot::eye]     = {256, 1};
     config.cost[Slot::radar]   = {256, 1};
 
-    config.cost[Slot::link]    = {0,   0};
+    config.cost[Slot::link]    = {  0, 0};
 
     config.spawn_mul = 256;
     config.capacity_mul = 256;
@@ -1367,7 +1371,7 @@ void World::init()
         {
             uint64_t xx = (tiles[i].rand.uint32() & tile_mask) | offs_x;
             uint64_t yy = (tiles[i].rand.uint32() & tile_mask) | offs_y;
-            tiles[i].foods.emplace_back(config, Food::Grass, Position{xx, yy});
+            tiles[i].foods.emplace_back(config, Food::grass, Position{xx, yy});
         }
         total_food_count += tiles[i].spawn_start = n;
 

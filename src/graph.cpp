@@ -36,7 +36,6 @@ namespace Gui
     constexpr unsigned icon_offset  = 8;
     constexpr unsigned icon_row     = 4;
     constexpr unsigned flag_row     = 3;
-    constexpr unsigned end_flag = 1 << 7;
 
     constexpr int line_spacing = line_height + 2 * margin;
     constexpr int item_width = spacing + 3 * digit_width + icon_width;
@@ -187,7 +186,7 @@ struct FoodData
         x = food.pos.x * draw_scale;
         y = food.pos.y * draw_scale;
         rad = config.base_radius * draw_scale;
-        type = food.type - Food::Grass;
+        type = food.type - Food::grass;
     }
 };
 
@@ -727,7 +726,7 @@ bool Representation::mouse_wheel(const SDL_MouseWheelEvent &evt)
         sel.set_scroll(cam, l_slot, sel.scroll[l_slot] - 4 * Gui::line_spacing * evt.y);  return true;
 
     case t_genes:  case t_gene_scroll:
-        sel.set_scroll(cam, l_gene, sel.scroll[l_slot] - 4 * Gui::line_spacing * evt.y);  return true;
+        sel.set_scroll(cam, l_gene, sel.scroll[l_gene] - 4 * Gui::line_spacing * evt.y);  return true;
 
     default:
         return false;
@@ -861,12 +860,11 @@ void put_weight(std::vector<GuiQuad> &buf, int x, int y, int32_t weight)
 
 void put_flags(std::vector<GuiQuad> &buf, int x, int y, unsigned flags, unsigned flag_count)
 {
-    unsigned flag = Gui::end_flag >> flag_count;
     unsigned rows = (flag_count - 1) / Gui::flag_row + 1;
     y += (Gui::line_height - rows * Gui::flag_height) / 2;
     for(unsigned i = 0; i < flag_count; i++)
     {
-        unsigned ty = flags & (flag << i) ? Gui::flag_pos : Gui::flag_pos + Gui::flag_height;
+        unsigned ty = flags & (1 << i) ? Gui::flag_pos : Gui::flag_pos + Gui::flag_height;
         buf.emplace_back(x, y, i * Gui::flag_width, ty, Gui::flag_width, Gui::flag_height);
         x += Gui::flag_width;  if((i + 1) % Gui::flag_row)continue;
         x -= Gui::flag_row * Gui::flag_width;  y += Gui::flag_height;
@@ -995,7 +993,7 @@ void Representation::Selection::fill_sel_genes(const Config &config,
 
         const Gui::TypeIcons &icons = Gui::icons[type];
         if(icons.base)
-            put_item(data_gui, x += Gui::item_width, y, icons.base, base - 1);
+            put_item(data_gui, x += Gui::item_width, y, icons.base, base);
         if(icons.angle1)
             put_item(data_gui, x += Gui::item_width, y, icons.angle1, angle1);
         if(icons.angle2)
@@ -1140,7 +1138,8 @@ void Representation::Selection::fill_sel_levels(GLuint buf, size_t &size)
 void Representation::Selection::fill_sel_links(GLuint buf, size_t &size)
 {
     const auto &slots = proc.slots;  const auto &links = proc.links;
-    if(slot < 0 || slots[slot].neiro_state == GenomeProcessor::s_input || !slots[slot].link_count)
+    if(slot < 0 || slots[slot].neiro_state == GenomeProcessor::s_input ||
+        !slots[slot].link_count || refs[slot] == uint32_t(-1))
     {
         glBindBuffer(GL_ARRAY_BUFFER, buf);
         glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
@@ -1246,7 +1245,7 @@ void Representation::update(SDL_Window *window, bool checksum)
     sel.cr = nullptr;
     for(const auto &tile : world.tiles)
     {
-        for(const auto &food : tile.foods)if(food.type > Food::Sprout)
+        for(const auto &food : tile.foods)if(food.type > Food::sprout)
             (food_ptr++)->set(world.config, food);
 
         for(const Creature *cr = tile.first; cr; cr = cr->next)
