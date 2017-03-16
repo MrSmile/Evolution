@@ -118,8 +118,7 @@ class Representation
     GLuint prog[pass_count], tex_gui, tex_panel;
     GLint i_transform[prog_count], i_size, i_gui, i_panel;
     GLuint arr[pass_count], buf[buf_count];
-    size_t elem_count[pass_count];
-    size_t obj_count[pass_count];
+    size_t count[buf_count];
     int scroll_base, mouse_start;
     Selection sel;
 

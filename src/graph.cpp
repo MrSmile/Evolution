@@ -372,18 +372,18 @@ void Representation::fill_sel_bufs()
     sel.slot = -1;  sel.scroll[l_slot] = sel.scroll[l_gene] = 0;
 
     sel.fill_sel_genes(world.config,
-        buf[inst_gene_bg], buf[inst_gene], obj_count[pass_gene_bg], obj_count[pass_gene]);
-    sel.fill_sel_header(buf[inst_header], obj_count[pass_header]);
-    sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], obj_count[pass_slot_bg], obj_count[pass_slot]);
-    sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
-    sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
+        buf[inst_gene_bg], buf[inst_gene], count[inst_gene_bg], count[inst_gene]);
+    sel.fill_sel_header(buf[inst_header], count[inst_header]);
+    sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], count[inst_slot_bg], count[inst_slot]);
+    sel.fill_sel_levels(buf[inst_level], count[inst_level]);
+    sel.fill_sel_links(buf[inst_link], count[inst_link]);
 }
 
 void Representation::make_food_shape()
 {
     constexpr int n = 3, m = 2 * n - 2;
-    elem_count[pass_food] = 3 * m + 3;
-    obj_count[pass_food] = 0;
+    count[idx_food] = 3 * m + 3;
+    count[inst_food] = 0;
 
     Vertex vertex[2 * n];
     for(int i = 0; i < 2 * n; i++)
@@ -411,8 +411,8 @@ void Representation::make_food_shape()
 void Representation::make_creature_shape()
 {
     constexpr int n = 8;
-    elem_count[pass_creature] = 3 * n;
-    obj_count[pass_creature] = 0;
+    count[idx_creature] = 3 * n;
+    count[inst_creature] = 0;
 
     Vertex vertex[n + 1];
     double r = 1 / std::cos(pi / n);
@@ -435,9 +435,7 @@ void Representation::make_creature_shape()
 
 void Representation::make_quad_shape()
 {
-    elem_count[pass_slot_bg] = elem_count[pass_gene_bg] = 4;
-    elem_count[pass_slot] = elem_count[pass_level] = elem_count[pass_link] = 4;
-    elem_count[pass_gene] = elem_count[pass_header] = 4;
+    count[vtx_quad] = 4;
 
     Vertex vertex[4] =
     {
@@ -485,8 +483,7 @@ void Representation::make_panel()
 {
     constexpr int nx = 6, ny = 6, nb = 4, ns = 4;
     constexpr int m = (2 * nx + 1) * (ny - 1) + 4 * nb + 13;
-    elem_count[pass_panel] = m;
-    obj_count[pass_panel] = 2 * ns;
+    count[vtx_panel] = m;  count[idx_panel] = 2 * ns;
 
     int index;
     GLshort  x[nx],  y[ny],  b[nb],  s[ns];
@@ -709,7 +706,7 @@ bool Representation::select_slot(List list, int y)
     if(sel.slot == slot)return false;
 
     sel.slot = slot;
-    sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
+    sel.fill_sel_links(buf[inst_link], count[inst_link]);
     return true;
 }
 
@@ -744,10 +741,10 @@ bool Representation::mouse_down(const SDL_MouseButtonEvent &evt)
 
     case t_show_all:
         sel.skip_unused = !sel.skip_unused;
-        sel.fill_sel_header(buf[inst_header], obj_count[pass_header]);
-        sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], obj_count[pass_slot_bg], obj_count[pass_slot]);
-        sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
-        sel.fill_sel_links(buf[inst_link], obj_count[pass_link]);
+        sel.fill_sel_header(buf[inst_header], count[inst_header]);
+        sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], count[inst_slot_bg], count[inst_slot]);
+        sel.fill_sel_levels(buf[inst_level], count[inst_level]);
+        sel.fill_sel_links(buf[inst_link], count[inst_link]);
         sel.set_scroll(cam, l_slot, sel.scroll[l_slot]);
         return true;
 
@@ -1228,19 +1225,19 @@ bool Representation::select(int32_t x, int32_t y)
 
 void Representation::update(SDL_Window *window, bool checksum)
 {
-    obj_count[pass_food] = world.total_food_count;
+    count[inst_food] = world.total_food_count;
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_ptr = nullptr;
-    glBufferData(GL_ARRAY_BUFFER, obj_count[pass_food] * sizeof(FoodData), nullptr, GL_STREAM_DRAW);
-    if(obj_count[pass_food])food_ptr = static_cast<FoodData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+    glBufferData(GL_ARRAY_BUFFER, count[inst_food] * sizeof(FoodData), nullptr, GL_STREAM_DRAW);
+    if(count[inst_food])food_ptr = static_cast<FoodData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
 
-    obj_count[pass_creature] = world.total_creature_count;
+    count[inst_creature] = world.total_creature_count;
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);  CreatureData *creature_ptr = nullptr;
-    glBufferData(GL_ARRAY_BUFFER, obj_count[pass_creature] * sizeof(CreatureData), nullptr, GL_STREAM_DRAW);
-    if(obj_count[pass_creature])creature_ptr = static_cast<CreatureData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+    glBufferData(GL_ARRAY_BUFFER, count[inst_creature] * sizeof(CreatureData), nullptr, GL_STREAM_DRAW);
+    if(count[inst_creature])creature_ptr = static_cast<CreatureData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
 
 #ifndef NDEBUG
-    FoodData *food_end = food_ptr + obj_count[pass_food];
-    CreatureData *creature_end = creature_ptr + obj_count[pass_creature];
+    FoodData *food_end = food_ptr + count[inst_food];
+    CreatureData *creature_end = creature_ptr + count[inst_creature];
 #endif
     sel.cr = nullptr;
     for(const auto &tile : world.tiles)
@@ -1257,8 +1254,8 @@ void Representation::update(SDL_Window *window, bool checksum)
     assert(food_ptr == food_end);
     assert(creature_ptr == creature_end);
 
-    sel.fill_sel_header(buf[inst_header], obj_count[pass_header]);
-    sel.fill_sel_levels(buf[inst_level], obj_count[pass_level]);
+    sel.fill_sel_header(buf[inst_header], count[inst_header]);
+    sel.fill_sel_levels(buf[inst_level], count[inst_level]);
 
     if(sel.cr)
     {
@@ -1305,25 +1302,22 @@ void Representation::draw()
 
     double mul_x = 2 / (cam.width  * cam.scale);
     double mul_y = 2 / (cam.height * cam.scale);
-    uint64_t x = cam.x & world.config.full_mask_x;
-    uint64_t y = cam.y & world.config.full_mask_y;
-    int order_x = world.config.order_x + tile_order;
-    int order_y = world.config.order_y + tile_order;
-    int nx = (x + cam.width  * cam.scale) * std::exp2(-order_x);
-    int ny = (y + cam.height * cam.scale) * std::exp2(-order_y);
-    double dx = mul_x * std::exp2(order_x), x0 = x * mul_x + 1;
-    double dy = mul_y * std::exp2(order_y), y0 = y * mul_y + 1;
+    double scale_x = tile_size * mul_x, dx = (world.config.mask_x + 1) * scale_x;
+    double scale_y = tile_size * mul_y, dy = (world.config.mask_y + 1) * scale_y;
+    double x_end = 1 + scale_x, x_beg = x_end + ((cam.x - tile_size) & world.config.full_mask_x) * mul_x;
+    double y_end = 1 + scale_y, y_beg = y_end + ((cam.y - tile_size) & world.config.full_mask_y) * mul_y;
 
     Program cur = prog_count;
     for(int pass = 0; pass < pass_field_end; pass++)
     {
-        if(cur != pass_info[pass].prog)glUseProgram(prog[cur = pass_info[pass].prog]);
+        const PassInfo &info = pass_info[pass];
+        if(cur != info.prog)glUseProgram(prog[cur = info.prog]);
 
         glBindVertexArray(arr[pass]);
-        for(int i = 0; i <= ny; i++)for(int j = 0; j <= nx; j++)
+        for(double y = -y_beg; y < y_end; y += dy)for(double x = -x_beg; x < x_end; x += dx)
         {
-            glUniform4f(i_transform[cur], j * dx - x0, y0 - i * dy, mul_x * tile_size, -mul_y * tile_size);
-            glDrawElementsInstanced(GL_TRIANGLES, elem_count[pass], GL_UNSIGNED_BYTE, nullptr, obj_count[pass]);
+            glUniform4f(i_transform[cur], x, -y, scale_x, -scale_y);
+            glDrawElementsInstanced(GL_TRIANGLES, count[info.index], GL_UNSIGNED_BYTE, nullptr, count[info.inst]);
         }
     }
 
@@ -1347,29 +1341,29 @@ void Representation::draw()
     glUseProgram(prog[prog_back]);  glBindVertexArray(arr[pass_slot_bg]);
     glUniform4f(i_transform[prog_back], x_slot, y_slot, mul_x, -mul_y);
     glUniform3f(i_size, Gui::slot_width, Gui::line_spacing, sel.slot);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_slot_bg], obj_count[pass_slot_bg]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, count[vtx_quad], count[inst_slot_bg]);
 
     glBindVertexArray(arr[pass_gene_bg]);
     glUniform4f(i_transform[prog_back], x_gene, y_gene, mul_x, -mul_y);
     glUniform3f(i_size, Gui::gene_width, Gui::line_spacing, sel.slot);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_gene_bg], obj_count[pass_gene_bg]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, count[vtx_quad], count[inst_gene_bg]);
 
     glUseProgram(prog[prog_gui]);  glUniform1i(i_gui, 0);
     glActiveTexture(GL_TEXTURE0);  glBindTexture(GL_TEXTURE_2D, tex_gui);
 
     glBindVertexArray(arr[pass_slot]);
     glUniform4f(i_transform[prog_gui], x_slot, y_slot, mul_x, -mul_y);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_slot], obj_count[pass_slot]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, count[vtx_quad], count[inst_slot]);
 
     glBindVertexArray(arr[pass_level]);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_level], obj_count[pass_level]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, count[vtx_quad], count[inst_level]);
 
     glBindVertexArray(arr[pass_link]);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_link], obj_count[pass_link]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, count[vtx_quad], count[inst_link]);
 
     glBindVertexArray(arr[pass_gene]);
     glUniform4f(i_transform[prog_gui], x_gene, y_gene, mul_x, -mul_y);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_gene], obj_count[pass_gene]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, count[vtx_quad], count[inst_gene]);
 
     glDisable(GL_SCISSOR_TEST);
 
@@ -1378,8 +1372,8 @@ void Representation::draw()
 
     glBindVertexArray(arr[pass_panel]);
     glUniform4f(i_transform[prog_panel], x_slot, 1, mul_x, -mul_y);  glUniform1f(i_size, cam.height);
-    glDrawElements(GL_TRIANGLE_STRIP, elem_count[pass_panel], GL_UNSIGNED_BYTE, nullptr);
-    void *scroll_offs = reinterpret_cast<void *>(elem_count[pass_panel]);
+    glDrawElements(GL_TRIANGLE_STRIP, count[vtx_panel], GL_UNSIGNED_BYTE, nullptr);
+    void *scroll_offs = reinterpret_cast<void *>(count[vtx_panel]);
 
     int scroll_pos[] = {Gui::panel_width - Gui::slot_width, Gui::scroll_width};
     for(int i = 0; i < list_count; i++)
@@ -1390,7 +1384,7 @@ void Representation::draw()
         double x = 1 - scroll_pos[i] * mul_x;
         double y = 1 - (Gui::header_height + sel.scroll[i] * scroll) * mul_y;
         glUniform4f(i_transform[prog_panel], x, y, mul_x, -mul_y);  glUniform1f(i_size, list_height * scroll);
-        glDrawElements(GL_TRIANGLE_STRIP, obj_count[pass_panel], GL_UNSIGNED_BYTE, scroll_offs);
+        glDrawElements(GL_TRIANGLE_STRIP, count[idx_panel], GL_UNSIGNED_BYTE, scroll_offs);
     }
 
     glUseProgram(prog[prog_gui]);  glUniform1i(i_gui, 0);
@@ -1398,5 +1392,5 @@ void Representation::draw()
 
     glBindVertexArray(arr[pass_header]);
     glUniform4f(i_transform[prog_gui], x_slot, 1, mul_x, -mul_y);
-    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, elem_count[pass_header], obj_count[pass_header]);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, count[vtx_quad], count[inst_header]);
 }
