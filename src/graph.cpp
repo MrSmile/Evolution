@@ -299,6 +299,10 @@ const VertexAttribute layout_creature[] =
     ATTR(CreatureData, rad,     3,       GL_FLOAT,          f_instance),
     ATTR(CreatureData, angle,   4,       GL_UNSIGNED_BYTE,  f_instance | f_normalize),
 };
+const VertexAttribute layout_sel[] =
+{
+    ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
+};
 const VertexAttribute layout_back[] =
 {
     ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
@@ -328,6 +332,7 @@ const Representation::PassInfo Representation::pass_info[] =
 {
     INFO(food,     vtx_food,     inst_food,     idx_food),
     INFO(creature, vtx_creature, inst_creature, idx_creature),
+    INFO(sel,      vtx_sel,      buf_count,     idx_sel),
     INFO(back,     vtx_quad,     inst_slot_bg,  buf_count),
     INFO(back,     vtx_quad,     inst_gene_bg,  buf_count),
     INFO(gui,      vtx_quad,     inst_slot,     buf_count),
@@ -432,6 +437,37 @@ void Representation::make_creature_shape()
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_creature]);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangle), triangle, GL_STATIC_DRAW);
+}
+
+void Representation::make_sel_shape()
+{
+    constexpr int n = 24;
+    constexpr GLfloat inner = 1.3, outer = 1.5, hole = 0.8;
+    count[idx_sel] = n + 3;
+
+    Vertex vertex[n], cur = {1, 0};
+    for(int i = 0, k = 0; i < 4; i++)
+    {
+        vertex[k++] = {inner * cur.x + hole  * cur.y, inner * cur.y - hole  * cur.x};
+        vertex[k++] = {outer * cur.x + hole  * cur.y, outer * cur.y - hole  * cur.x};
+        vertex[k++] = {inner * cur.x + inner * cur.y, inner * cur.y - inner * cur.x};
+        vertex[k++] = {outer * cur.x + outer * cur.y, outer * cur.y - outer * cur.x};
+        vertex[k++] = {hole  * cur.x + inner * cur.y, hole  * cur.y - inner * cur.x};
+        vertex[k++] = {hole  * cur.x + outer * cur.y, hole  * cur.y - outer * cur.x};
+        cur = {cur.y, -cur.x};
+    }
+
+    GLubyte index[n + 3];  index[0] = 0;
+    for(int i = 1, k = 1; i < n; i++)
+    {
+        if(!(i % 6))index[k++] = GLubyte(-1);  index[k++] = i;
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_sel]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_sel]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(index), index, GL_STATIC_DRAW);
 }
 
 void Representation::make_quad_shape()
@@ -605,6 +641,10 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
     prog[prog_creature] = create_program("creature", VertShader::creature, FragShader::creature);
     i_transform[prog_creature] = glGetUniformLocation(prog[prog_creature], "transform");
 
+    prog[prog_sel] = create_program("back", VertShader::sel, FragShader::color);
+    i_transform[prog_sel] = glGetUniformLocation(prog[prog_sel], "transform");
+    i_sel = glGetUniformLocation(prog[prog_sel], "sel");
+
     prog[prog_back] = create_program("back", VertShader::back, FragShader::color);
     i_transform[prog_back] = glGetUniformLocation(prog[prog_back], "transform");
     i_size = glGetUniformLocation(prog[prog_back], "size");
@@ -640,6 +680,7 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
 
     make_food_shape();
     make_creature_shape();
+    make_sel_shape();
     make_quad_shape();
     make_panel();
 }
@@ -1319,6 +1360,18 @@ void Representation::draw()
         {
             glUniform4f(i_transform[cur], x, -y, scale_x, -scale_y);
             glDrawElementsInstanced(GL_TRIANGLES, count[info.index], GL_UNSIGNED_BYTE, nullptr, count[info.inst]);
+        }
+    }
+
+    if(sel.cr)
+    {
+        double radius = world.config.base_radius + 4 * cam.scale;
+        glUseProgram(prog[prog_sel]);  glBindVertexArray(arr[pass_sel]);
+        glUniform3f(i_sel, sel.pos.x * draw_scale, sel.pos.y * draw_scale, radius * draw_scale);
+        for(double y = -y_beg; y < y_end; y += dy)for(double x = -x_beg; x < x_end; x += dx)
+        {
+            glUniform4f(i_transform[prog_sel], x, -y, scale_x, -scale_y);
+            glDrawElements(GL_TRIANGLE_STRIP, count[idx_sel], GL_UNSIGNED_BYTE, nullptr);
         }
     }
 

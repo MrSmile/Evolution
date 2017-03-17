@@ -45,21 +45,21 @@ class Representation
 {
     enum Program
     {
-        prog_food, prog_creature, prog_back, prog_gui, prog_panel, prog_count
+        prog_food, prog_creature, prog_sel, prog_back, prog_gui, prog_panel, prog_count
     };
 
     enum Pass
     {
-        pass_food, pass_creature, pass_slot_bg, pass_gene_bg,
+        pass_food, pass_creature, pass_sel, pass_slot_bg, pass_gene_bg,
         pass_slot, pass_level, pass_link, pass_gene, pass_header, pass_panel,
-        pass_count, pass_field_end = pass_slot_bg
+        pass_count, pass_field_end = pass_sel
     };
 
     enum Buffer
     {
         vtx_food, inst_food, idx_food,
         vtx_creature, inst_creature, idx_creature,
-        vtx_quad, inst_slot_bg, inst_gene_bg,
+        vtx_sel, idx_sel, vtx_quad, inst_slot_bg, inst_gene_bg,
         inst_slot, inst_level, inst_link, inst_gene, inst_header,
         vtx_panel, idx_panel,
         buf_count
@@ -116,7 +116,7 @@ class Representation
     const World &world;
     Camera cam;  HitTest move;
     GLuint prog[pass_count], tex_gui, tex_panel;
-    GLint i_transform[prog_count], i_size, i_gui, i_panel;
+    GLint i_transform[prog_count], i_sel, i_size, i_gui, i_panel;
     GLuint arr[pass_count], buf[buf_count];
     size_t count[buf_count];
     int scroll_base, mouse_start;
@@ -126,6 +126,7 @@ class Representation
     void fill_sel_bufs();
     void make_food_shape();
     void make_creature_shape();
+    void make_sel_shape();
     void make_quad_shape();
     void make_panel();
 
