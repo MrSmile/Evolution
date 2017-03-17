@@ -341,26 +341,27 @@ const Representation::PassInfo Representation::pass_info[] =
 #undef INFO
 
 
-GLuint load_shader(GLint type, const char *name, const char *data, GLint size)
+GLuint load_shader(GLint type, const char *name, int id)
 {
-    GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &data, &size);
+    GLuint shader = glCreateShader(type);  GLint size = shaders[id].length;
+    glShaderSource(shader, 1, &shaders[id].source, &size);
 
     char msg[65536];  GLsizei len;
     glCompileShader(shader);  glGetShaderInfoLog(shader, sizeof(msg), &len, msg);
-    if(len)std::printf("%s shader log:\n%s\n", name, msg);  return shader;
+    if(len)std::printf("%s shader \"%s\" log:\n%s\n", name, shaders[id].name, msg);
+    return shader;
 }
 
-GLuint create_program(Shader::Index id)
+GLuint create_program(const char *name, VertShader::Index vert_id, FragShader::Index frag_id)
 {
-    GLuint prog = glCreateProgram();  const ShaderDesc &shader = shaders[id];
-    GLuint vert = load_shader(GL_VERTEX_SHADER, "Vertex", shader.vert_src, shader.vert_len);
-    GLuint frag = load_shader(GL_FRAGMENT_SHADER, "Fragment", shader.frag_src, shader.frag_len);
+    GLuint prog = glCreateProgram();
+    GLuint vert = load_shader(GL_VERTEX_SHADER, "Vertex", vert_id);
+    GLuint frag = load_shader(GL_FRAGMENT_SHADER, "Fragment", frag_id);
     glAttachShader(prog, vert);  glAttachShader(prog, frag);
 
     char msg[65536];  GLsizei len;
     glLinkProgram(prog);  glGetProgramInfoLog(prog, sizeof(msg), &len, msg);
-    if(len)std::printf("Shader program \"%s\" log:\n%s\n", shader.name, msg);
+    if(len)std::printf("Shader program \"%s\" log:\n%s\n", name, msg);
 
     glDetachShader(prog, vert);  glDetachShader(prog, frag);
     glDeleteShader(vert);  glDeleteShader(frag);  return prog;
@@ -598,24 +599,24 @@ GLuint load_texture(Image::Index id)
 
 Representation::Representation(const World &world, SDL_Window *window) : world(world), cam(window), move(t_none)
 {
-    prog[prog_food] = create_program(Shader::food);
+    prog[prog_food] = create_program("food", VertShader::food, FragShader::color);
     i_transform[prog_food] = glGetUniformLocation(prog[prog_food], "transform");
 
-    prog[prog_creature] = create_program(Shader::creature);
+    prog[prog_creature] = create_program("creature", VertShader::creature, FragShader::creature);
     i_transform[prog_creature] = glGetUniformLocation(prog[prog_creature], "transform");
 
-    prog[prog_back] = create_program(Shader::back);
+    prog[prog_back] = create_program("back", VertShader::back, FragShader::color);
     i_transform[prog_back] = glGetUniformLocation(prog[prog_back], "transform");
     i_size = glGetUniformLocation(prog[prog_back], "size");
 
-    prog[prog_gui] = create_program(Shader::gui);
+    prog[prog_gui] = create_program("gui", VertShader::gui, FragShader::texture);
     i_transform[prog_gui] = glGetUniformLocation(prog[prog_gui], "transform");
-    i_gui = glGetUniformLocation(prog[prog_gui], "gui");
+    i_gui = glGetUniformLocation(prog[prog_gui], "tex");
 
-    prog[prog_panel] = create_program(Shader::panel);
+    prog[prog_panel] = create_program("panel", VertShader::panel, FragShader::texture);
     i_transform[prog_panel] = glGetUniformLocation(prog[prog_panel], "transform");
     i_size = glGetUniformLocation(prog[prog_panel], "height");
-    i_panel = glGetUniformLocation(prog[prog_panel], "panel");
+    i_panel = glGetUniformLocation(prog[prog_panel], "tex");
 
 
     glGenVertexArrays(pass_count, arr);

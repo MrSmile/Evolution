@@ -7,7 +7,6 @@
 #include <cstdio>
 #include <string>
 #include <vector>
-#include <map>
 
 
 
@@ -18,17 +17,27 @@ enum class Type
 
 struct Image
 {
+    std::string name;
     size_t width, height;
+
+    Image(const char *name, size_t name_len, size_t width, size_t height) :
+        name(name, name_len), width(width), height(height)
+    {
+    }
 };
 
 struct Shader
 {
-    size_t vert_len, frag_len;
+    Type type;
+    std::string name;
+    size_t length;
 
-    Shader() : vert_len(0), frag_len(0)
+    Shader(Type type, const char *name, size_t name_len, size_t length) :
+        type(type), name(name, name_len), length(length)
     {
     }
 };
+
 
 inline bool check_postfix(const char *str, size_t &len, const char *postfix, size_t n)
 {
@@ -127,7 +136,7 @@ size_t load_shader(const char *type, const char *name, size_t len, FILE *output)
 }
 
 
-bool load_image(const char *name, size_t len, FILE *output, Image &desc)
+bool load_image(const char *name, size_t len, FILE *output, size_t &width, size_t &height)
 {
     std::string path = "images/" + std::string(name);
 
@@ -143,7 +152,7 @@ bool load_image(const char *name, size_t len, FILE *output, Image &desc)
         std::printf("Wrong format of PNG file \"%s\", should be 8-bit RGBA\n", path.c_str());
         png_close_file(&png);  return false;
     }
-    desc.width = png.width;  desc.height = png.height;
+    width = png.width;  height = png.height;
     std::vector<unsigned char> buf(size_t(4) * png.width * png.height);
     err = png_get_data(&png, buf.data());  png_close_file(&png);
     if(err)
@@ -166,7 +175,7 @@ bool load_image(const char *name, size_t len, FILE *output, Image &desc)
 
 
 bool process_files(const char *result, const char *include, size_t prefix, char **args, int n,
-    std::map<std::string, Image> &images, std::map<std::string, Shader> &shaders)
+    std::vector<Image> &images, std::vector<Shader> &shaders)
 {
     File output(result, "wb");  if(!output)return cannot_open(result);
     if(std::fprintf(output, "// %s : resource data\n//\n\n#include \"%s\"\n\n",
@@ -178,19 +187,21 @@ bool process_files(const char *result, const char *include, size_t prefix, char 
         switch(classify(args[i], len))
         {
         case Type::image:
-            if(load_image(args[i], len, output, images[std::string(args[i], len)]))break;
-            else return false;
-
+            {
+                size_t width, height;
+                if(!load_image(args[i], len, output, width, height))return false;
+                images.emplace_back(args[i], len, width, height);  break;
+            }
         case Type::shader_vert:
             {
                 size_t size = load_shader("vert", args[i], len, output);
-                if(size)shaders[std::string(args[i], len)].vert_len = size;
+                if(size)shaders.emplace_back(Type::shader_vert, args[i], len, size);
                 else return false;  break;
             }
         case Type::shader_frag:
             {
                 size_t size = load_shader("frag", args[i], len, output);
-                if(size)shaders[std::string(args[i], len)].frag_len = size;
+                if(size)shaders.emplace_back(Type::shader_frag, args[i], len, size);
                 else return false;  break;
             }
         default:
@@ -201,34 +212,16 @@ bool process_files(const char *result, const char *include, size_t prefix, char 
     if(std::fprintf(output, "\nconst ImageDesc images[] =\n{") < 0)return write_error();
     for(const auto &image : images)
     {
-        if(std::fprintf(output, "\n    {\"%s\", image_%s, %uu, %uu},", image.first.c_str(), image.first.c_str(),
-            unsigned(image.second.width), unsigned(image.second.height)) < 0)return write_error();
+        if(std::fprintf(output, "\n    {\"%s\", image_%s, %uu, %uu},", image.name.c_str(), image.name.c_str(),
+            unsigned(image.width), unsigned(image.height)) < 0)return write_error();
     }
     if(std::fprintf(output, "\n};\n") < 0)return write_error();
 
     if(std::fprintf(output, "\nconst ShaderDesc shaders[] =\n{") < 0)return write_error();
     for(const auto &shader : shaders)
     {
-        if(std::fprintf(output, "\n    {\"%s\", ", shader.first.c_str()) < 0)return write_error();
-        if(shader.second.vert_len)
-        {
-            if(std::fprintf(output, "shader_%s_vert, ", shader.first.c_str()) < 0)return write_error();
-        }
-        else
-        {
-            if(std::fprintf(output, "nullptr, ") < 0)return write_error();
-        }
-        if(shader.second.frag_len)
-        {
-            if(std::fprintf(output, "shader_%s_frag, ", shader.first.c_str()) < 0)return write_error();
-        }
-        else
-        {
-            if(std::fprintf(output, "nullptr, ") < 0)return write_error();
-        }
-        if(std::fprintf(output, "%uu, %uu},",
-            unsigned(shader.second.vert_len),
-            unsigned(shader.second.frag_len)) < 0)return write_error();
+        if(std::fprintf(output, "\n    {\"%s\", shader_%s_%s, %uu},", shader.name.c_str(), shader.name.c_str(),
+            shader.type == Type::shader_vert ? "vert" : "frag", unsigned(shader.length)) < 0)return write_error();
     }
     if(std::fprintf(output, "\n};\n") < 0)return write_error();
     return true;
@@ -245,8 +238,8 @@ struct ImageDesc
 struct ShaderDesc
 {
     const char *name;
-    const char *vert_src, *frag_src;
-    unsigned vert_len, frag_len;
+    const char *source;
+    unsigned length;
 };
 
 extern const ImageDesc images[];
@@ -254,7 +247,7 @@ extern const ShaderDesc shaders[];
 )";
 
 bool write_desc(const char *result, size_t prefix,
-    const std::map<std::string, Image> &images, const std::map<std::string, Shader> &shaders)
+    const std::vector<Image> &images, const std::vector<Shader> &shaders)
 {
     File output(result, "wb");  if(!output)return cannot_open(result);
     if(std::fprintf(output, "// %s : resource description\n//\n\n", result + prefix) < 0)
@@ -262,12 +255,17 @@ bool write_desc(const char *result, size_t prefix,
 
     if(std::fprintf(output, "\nnamespace Image\n{\n    enum Index\n    {") < 0)return write_error();
     for(const auto &image : images)
-        if(std::fprintf(output, "\n        %s,", image.first.c_str()) < 0)return write_error();
+        if(std::fprintf(output, "\n        %s,", image.name.c_str()) < 0)return write_error();
     if(std::fprintf(output, "\n    };\n}\n") < 0)return write_error();
 
-    if(std::fprintf(output, "\nnamespace Shader\n{\n    enum Index\n    {") < 0)return write_error();
-    for(const auto &shader : shaders)
-        if(std::fprintf(output, "\n        %s,", shader.first.c_str()) < 0)return write_error();
+    if(std::fprintf(output, "\nnamespace VertShader\n{\n    enum Index\n    {") < 0)return write_error();
+    for(size_t i = 0; i < shaders.size(); i++)if(shaders[i].type == Type::shader_vert)
+        if(std::fprintf(output, "\n        %s = %u,", shaders[i].name.c_str(), unsigned(i)) < 0)return write_error();
+    if(std::fprintf(output, "\n    };\n}\n") < 0)return write_error();
+
+    if(std::fprintf(output, "\nnamespace FragShader\n{\n    enum Index\n    {") < 0)return write_error();
+    for(size_t i = 0; i < shaders.size(); i++)if(shaders[i].type == Type::shader_frag)
+        if(std::fprintf(output, "\n        %s = %u,", shaders[i].name.c_str(), unsigned(i)) < 0)return write_error();
     if(std::fprintf(output, "\n    };\n}\n") < 0)return write_error();
 
     return std::fprintf(output, "\n%s", header_tail) >= 0;
@@ -279,9 +277,7 @@ int main(int n, char **args)
     const char *result_cpp = "build/resource.cpp";
     const size_t prefix = 6;
 
-    png_init(0, 0);
-    std::map<std::string, Image> images;
-    std::map<std::string, Shader> shaders;
+    std::vector<Image> images;  std::vector<Shader> shaders;  png_init(0, 0);
     if(!process_files(result_cpp, result_h, prefix, args + 1, n - 1, images, shaders))return -1;
     return write_desc(result_h, prefix, images, shaders) ? 0 : -1;
 }
