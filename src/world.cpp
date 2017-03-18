@@ -1274,11 +1274,13 @@ void World::next_step()
             {
                 Creature *child = Creature::spawn(config, tiles[i].rand, *cr,
                     next_id++, prev_pos, prev_angle ^ flip_angle, womb.energy);
+                uint32_t leftover = womb.energy;
                 if(child)
                 {
+                    leftover -= child->passive_energy + child->energy;
                     *tiles[i].last = child;  tiles[i].last = &child->next;  total_creature_count++;
                 }
-                else spawn_meat(tiles[i], prev_pos, womb.energy);
+                spawn_meat(tiles[i], prev_pos, leftover);
             }
         }
     }
@@ -1293,7 +1295,7 @@ void World::next_step()
 }
 
 
-const char version_string[] = "Evol0002";
+const char version_string[] = "Evol0003";
 
 void World::init()
 {
@@ -1303,7 +1305,7 @@ void World::init()
     config.chromosome_bits = 4;  // 16 = 8 pair
     config.genome_split_factor = ~(uint32_t(-1) / 1024);
     config.chromosome_replace_factor = ~(uint32_t(-1) / 256);
-    config.chromosome_copy_prob = uint32_t(-1) / 2;
+    config.chromosome_copy_prob = ~(uint32_t(-1) / 256);
     config.bit_mutate_factor = ~(uint32_t(-1) / 1024);
 
     config.slot_bits = 6;  // 64 slots
@@ -1343,7 +1345,7 @@ void World::init()
     config.exp_sprout_per_grass = ~(uint32_t(-1) / 64);
     config.repression_range = tile_size / 16;
     config.sprout_dist_x4 = 5 * config.repression_range;
-    config.meat_dist_x4 = tile_size / 64;
+    config.meat_dist_x4 = tile_size / 16;
 
     bool res = config.calc_derived();
     assert(res);  (void)res;
