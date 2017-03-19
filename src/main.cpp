@@ -61,7 +61,6 @@ bool save_restart(World &world)
 
 bool main_loop(SDL_Window *window, char **args, int n)
 {
-    //glEnable(GL_DEPTH_TEST);  glDepthFunc(GL_GREATER);  glClearDepth(0);
     glEnable(GL_FRAMEBUFFER_SRGB);  glEnable(GL_MULTISAMPLE);
     glEnable(GL_CULL_FACE);
 
@@ -69,11 +68,12 @@ bool main_loop(SDL_Window *window, char **args, int n)
     if(n <= 1)world.init();
     else if(!load_restart(world, args[1]))return false;
     Representation graph(world, window);
-    graph.update(window, true);
+    graph.update_title(window, true);
+    graph.update();
 
     if(!check_gl_error())return false;
 
-    bool update = true, play = false;
+    bool update = true, active = true, play = false;
     for(SDL_Event evt;;)
     {
         if(!update)SDL_WaitEvent(&evt);
@@ -81,10 +81,15 @@ bool main_loop(SDL_Window *window, char **args, int n)
         {
             if(play)
             {
-                world.next_step();  graph.update(window, false);
+                world.next_step();  graph.update_title(window, false);
             }
-            graph.draw();  if(!check_gl_error())return false;
-            SDL_GL_SwapWindow(window);  update = play;  continue;
+            if(active)
+            {
+                if(play)graph.update();  graph.draw();
+                if(!check_gl_error())return false;
+                SDL_GL_SwapWindow(window);
+            }
+            update = play;  continue;
         }
         switch(evt.type)
         {
@@ -105,8 +110,21 @@ bool main_loop(SDL_Window *window, char **args, int n)
             continue;
 
         case SDL_WINDOWEVENT:
-            if(evt.window.event != SDL_WINDOWEVENT_RESIZED)continue;
-            graph.resize(evt.window.data1, evt.window.data2);  break;
+            switch(evt.window.event)
+            {
+            case SDL_WINDOWEVENT_RESIZED:
+                graph.resize(evt.window.data1, evt.window.data2);  break;
+
+            case SDL_WINDOWEVENT_MINIMIZED:
+                active = false;  continue;
+
+            case SDL_WINDOWEVENT_RESTORED:
+                graph.update();  active = true;  break;
+
+            default:
+                continue;
+            }
+            break;
 
         case SDL_KEYDOWN:
             switch(evt.key.keysym.sym)
@@ -115,8 +133,8 @@ bool main_loop(SDL_Window *window, char **args, int n)
                 update = play = !play;  continue;
 
             case SDLK_RIGHT:
-                world.next_step();  graph.update(window, true);
-                play = false;  break;
+                world.next_step();  graph.update_title(window, true);
+                graph.update();  play = false;  break;
 
             case SDLK_F5:
                 save_restart(world);  break;
@@ -153,7 +171,6 @@ int init(char **args, int n)
 #endif
 
     if(SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1))return sdl_error("Failed to enable double-buffering: ");
-    //if(SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24))return sdl_error("Failed to enable depth buffer: ");
     if(SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1))return sdl_error("Failed to enable sRGB framebuffer: ");
     if(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1) || SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4))
         return sdl_error("Failed to enable multisampling: ");

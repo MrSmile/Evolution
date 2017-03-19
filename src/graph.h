@@ -145,6 +145,7 @@ public:
     bool mouse_up(const SDL_MouseButtonEvent &evt);
 
     bool select(int x, int y);
-    void update(SDL_Window *window, bool checksum);
+    void update_title(SDL_Window *window, bool checksum);
+    void update();
     void draw();
 };

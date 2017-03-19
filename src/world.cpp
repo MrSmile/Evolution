@@ -1299,13 +1299,13 @@ const char version_string[] = "Evol0003";
 
 void World::init()
 {
-    config.order_x = config.order_y = 3;  // 8 x 8
+    config.order_x = config.order_y = 5;  // 32 x 32
     config.base_radius = tile_size / 64;
 
     config.chromosome_bits = 4;  // 16 = 8 pair
     config.genome_split_factor = ~(uint32_t(-1) / 1024);
     config.chromosome_replace_factor = ~(uint32_t(-1) / 256);
-    config.chromosome_copy_prob = ~(uint32_t(-1) / 256);
+    config.chromosome_copy_prob = ~(uint32_t(-1) / 1024);
     config.bit_mutate_factor = ~(uint32_t(-1) / 1024);
 
     config.slot_bits = 6;  // 64 slots
