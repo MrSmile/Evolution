@@ -37,8 +37,6 @@ struct Camera
 };
 
 
-constexpr double draw_scale = 1.0 / tile_size;
-
 struct VertexAttribute;
 
 class Representation
