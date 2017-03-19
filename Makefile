@@ -6,8 +6,8 @@ FLAGS = -std=c++11 -Wall -Wno-parentheses -Ibuild -DBUILTIN
 LIBS = -lSDL2 -lGL -lepoxy
 
 SOURCES = math.cpp hash.cpp stream.cpp world.cpp graph.cpp main.cpp
-SHADERS = food.vert creature.vert sel.vert back.vert gui.vert panel.vert \
-          color.frag creature.frag texture.frag
+SHADERS = food.vert creature.vert sector.vert sel.vert back.vert gui.vert panel.vert \
+          color.frag creature.frag sector.frag texture.frag
 IMAGES = icon.png gui.png panel.png
 PROGRAM = evolution
 

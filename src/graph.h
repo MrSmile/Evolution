@@ -45,22 +45,22 @@ class Representation
 {
     enum Program
     {
-        prog_food, prog_creature, prog_sel, prog_back, prog_gui, prog_panel, prog_count
+        prog_food, prog_creature, prog_sector, prog_sel, prog_back, prog_gui, prog_panel, prog_count
     };
 
     enum Pass
     {
-        pass_food, pass_creature, pass_sel, pass_slot_bg, pass_gene_bg,
+        pass_sector, pass_food, pass_creature, pass_sel, pass_slot_bg, pass_gene_bg,
         pass_slot, pass_level, pass_link, pass_gene, pass_header, pass_panel,
         pass_count, pass_field_end = pass_sel
     };
 
     enum Buffer
     {
-        vtx_food, inst_food, idx_food,
-        vtx_creature, inst_creature, idx_creature,
-        vtx_sel, idx_sel, vtx_quad, inst_slot_bg, inst_gene_bg,
-        inst_slot, inst_level, inst_link, inst_gene, inst_header,
+        vtx_food, idx_food, inst_food,
+        vtx_creature, idx_creature, inst_creature,
+        vtx_sector, idx_sector, inst_sector, vtx_sel, idx_sel,
+        vtx_quad, inst_slot_bg, inst_gene_bg, inst_slot, inst_level, inst_link, inst_gene, inst_header,
         vtx_panel, idx_panel,
         buf_count
     };
@@ -108,6 +108,7 @@ class Representation
         void fill_sel_slots(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
         void fill_sel_levels(GLuint buf, size_t &size);
         void fill_sel_links(GLuint buf, size_t &size);
+        void fill_sel_sectors(GLuint buf, size_t &size);
     };
 
 
@@ -126,6 +127,7 @@ class Representation
     void fill_sel_bufs();
     void make_food_shape();
     void make_creature_shape();
+    void make_sector_shape();
     void make_sel_shape();
     void make_quad_shape();
     void make_panel();
