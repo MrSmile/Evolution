@@ -118,6 +118,13 @@ const VertexAttribute layout_sector[] =
     ATTR(SectorData,   color1,  GL_BGRA, GL_UNSIGNED_BYTE,  f_instance | f_normalize),
     ATTR(SectorData,   color2,  GL_BGRA, GL_UNSIGNED_BYTE,  f_instance | f_normalize),
 };
+const VertexAttribute layout_leg[] =
+{
+    ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
+    ATTR(LegData,      x,       3,       GL_FLOAT,          f_instance),
+    ATTR(LegData,      angle,   1,       GL_UNSIGNED_BYTE,  f_instance),
+    ATTR(LegData,      color,   GL_BGRA, GL_UNSIGNED_BYTE,  f_instance | f_normalize),
+};
 const VertexAttribute layout_sel[] =
 {
     ATTR(Vertex,       x,       2,       GL_FLOAT,          0),
@@ -143,24 +150,25 @@ const VertexAttribute layout_panel[] =
 
 #undef ATTR
 
-#define INFO(name, base, inst, index) \
+#define INFO(name, base, inst, index, alpha_blending) \
     {Representation::prog_##name, sizeof(layout_##name) / sizeof(VertexAttribute), \
-        layout_##name, Representation::base, Representation::inst, Representation::index}
+        layout_##name, Representation::base, Representation::inst, Representation::index, alpha_blending}
 
 const Representation::PassInfo Representation::pass_info[] =
 {
-    INFO(sector,   vtx_sector,   inst_sector,   idx_sector),
-    INFO(food,     vtx_food,     inst_food,     idx_food),
-    INFO(creature, vtx_creature, inst_creature, idx_creature),
-    INFO(sel,      vtx_sel,      buf_count,     idx_sel),
-    INFO(back,     vtx_quad,     inst_slot_bg,  buf_count),
-    INFO(back,     vtx_quad,     inst_gene_bg,  buf_count),
-    INFO(gui,      vtx_quad,     inst_slot,     buf_count),
-    INFO(gui,      vtx_quad,     inst_level,    buf_count),
-    INFO(gui,      vtx_quad,     inst_link,     buf_count),
-    INFO(gui,      vtx_quad,     inst_gene,     buf_count),
-    INFO(gui,      vtx_quad,     inst_header,   buf_count),
-    INFO(panel,    vtx_panel,    buf_count,     idx_panel),
+    INFO(sector,   vtx_sector,   inst_sector,   idx_sector,   true),
+    INFO(food,     vtx_food,     inst_food,     idx_food,     false),
+    INFO(creature, vtx_creature, inst_creature, idx_creature, false),
+    INFO(leg,      vtx_leg,      inst_leg,      idx_leg,      true),
+    INFO(sel,      vtx_sel,      buf_count,     idx_sel,      false),
+    INFO(back,     vtx_quad,     inst_slot_bg,  buf_count,    true),
+    INFO(back,     vtx_quad,     inst_gene_bg,  buf_count,    true),
+    INFO(gui,      vtx_quad,     inst_slot,     buf_count,    true),
+    INFO(gui,      vtx_quad,     inst_level,    buf_count,    true),
+    INFO(gui,      vtx_quad,     inst_link,     buf_count,    true),
+    INFO(gui,      vtx_quad,     inst_gene,     buf_count,    true),
+    INFO(gui,      vtx_quad,     inst_header,   buf_count,    true),
+    INFO(panel,    vtx_panel,    buf_count,     idx_panel,    true),
 };
 
 #undef INFO
@@ -203,7 +211,7 @@ void Representation::fill_sel_bufs()
     sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], count[inst_slot_bg], count[inst_slot]);
     sel.fill_sel_levels(buf[inst_level], count[inst_level]);
     sel.fill_sel_links(buf[inst_link], count[inst_link]);
-    sel.fill_sel_sectors(buf[inst_sector], count[inst_sector]);
+    sel.fill_sel_limbs(buf[inst_sector], buf[inst_leg], count[inst_sector], count[inst_leg]);
 }
 
 void Representation::make_food_shape()
@@ -277,6 +285,28 @@ void Representation::make_sector_shape()
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_sector]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangle), triangle, GL_STATIC_DRAW);
+}
+
+void Representation::make_leg_shape()
+{
+    count[idx_leg] = 6;
+    count[inst_leg] = 0;
+
+    Vertex vertex[4] =
+    {
+        {0, 0}, {0.5, 0.5}, {0.5, -0.5}, {1, 0}
+    };
+
+    Triangle triangle[2] =
+    {
+        {0, 1, 2}, {3, 2, 1}
+    };
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf[vtx_leg]);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex), vertex, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, buf[idx_leg]);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(triangle), triangle, GL_STATIC_DRAW);
 }
 
@@ -485,6 +515,9 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
     prog[prog_sector] = create_program("sector", VertShader::sector, FragShader::sector);
     i_transform[prog_sector] = glGetUniformLocation(prog[prog_sector], "transform");
 
+    prog[prog_leg] = create_program("leg", VertShader::leg, FragShader::color);
+    i_transform[prog_leg] = glGetUniformLocation(prog[prog_leg], "transform");
+
     prog[prog_sel] = create_program("back", VertShader::sel, FragShader::color);
     i_transform[prog_sel] = glGetUniformLocation(prog[prog_sel], "transform");
     i_sel = glGetUniformLocation(prog[prog_sel], "sel");
@@ -525,6 +558,7 @@ Representation::Representation(const World &world, SDL_Window *window) : world(w
     make_food_shape();
     make_creature_shape();
     make_sector_shape();
+    make_leg_shape();
     make_sel_shape();
     make_quad_shape();
     make_panel();
@@ -579,7 +613,7 @@ bool Representation::select_slot(List list, int y)
 
     sel.slot = slot;
     sel.fill_sel_links(buf[inst_link], count[inst_link]);
-    sel.fill_sel_sectors(buf[inst_sector], count[inst_sector]);
+    sel.fill_sel_limbs(buf[inst_sector], buf[inst_leg], count[inst_sector], count[inst_leg]);
     return true;
 }
 
@@ -618,7 +652,7 @@ bool Representation::mouse_down(const SDL_MouseButtonEvent &evt)
         sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], count[inst_slot_bg], count[inst_slot]);
         sel.fill_sel_levels(buf[inst_level], count[inst_level]);
         sel.fill_sel_links(buf[inst_link], count[inst_link]);
-        sel.fill_sel_sectors(buf[inst_sector], count[inst_sector]);
+        sel.fill_sel_limbs(buf[inst_sector], buf[inst_leg], count[inst_sector], count[inst_leg]);
         sel.set_scroll(cam, l_slot, sel.scroll[l_slot]);
         return true;
 
@@ -768,7 +802,7 @@ void Representation::update(SDL_Window *window, bool checksum)
 
     sel.fill_sel_header(buf[inst_header], count[inst_header]);
     sel.fill_sel_levels(buf[inst_level], count[inst_level]);
-    sel.fill_sel_sectors(buf[inst_sector], count[inst_sector]);
+    sel.fill_sel_limbs(buf[inst_sector], buf[inst_leg], count[inst_sector], count[inst_leg]);
 
     if(sel.cr)
     {
@@ -820,12 +854,11 @@ void Representation::draw()
     double y_end = 1 + scale_y, y_beg = y_end + ((cam.y - tile_size) & world.config.full_mask_y) * mul_y;
 
     Program cur = prog_count;
-    for(int pass = 0; pass < pass_field_end; pass++)
+    for(int pass = 0; pass < pass_sel; pass++)
     {
         const PassInfo &info = pass_info[pass];
         if(cur != info.prog)glUseProgram(prog[cur = info.prog]);
-
-        if(pass == pass_sector)glEnable(GL_BLEND);
+        if(info.alpha_blending)glEnable(GL_BLEND);
         else glDisable(GL_BLEND);
 
         glBindVertexArray(arr[pass]);

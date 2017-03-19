@@ -7,7 +7,6 @@ layout(location = 3) in vec4 in_color1;
 layout(location = 4) in vec4 in_color2;
 
 uniform vec4 transform;  // [dx, dy, scale.x, scale.y]
-uniform int sel;
 
 out vec2 coord;
 out vec4 color1;

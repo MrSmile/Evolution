@@ -385,38 +385,65 @@ void Representation::Selection::fill_sel_links(GLuint buf, size_t &size)
     size = data.size();
 }
 
-void Representation::Selection::fill_sel_sectors(GLuint buf, size_t &size)
+void Representation::Selection::fill_sel_limbs(GLuint buf_sector, GLuint buf_leg, size_t &size_sector, size_t &size_leg)
 {
     if(!cr)
     {
-        glBindBuffer(GL_ARRAY_BUFFER, buf);
+        glBindBuffer(GL_ARRAY_BUFFER, buf_sector);
         glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-        size = 0;  return;
+        size_sector = 0;
+
+        glBindBuffer(GL_ARRAY_BUFFER, buf_leg);
+        glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+        size_leg = 0;  return;
     }
 
     const auto &slots = proc.slots;
-    std::vector<SectorData> data;
-    data.reserve(slots.size());
+    std::vector<SectorData> data_sector;
+    data_sector.reserve(slots.size());
+
+    std::vector<LegData> data_leg;
+    data_leg.reserve(slots.size());
 
     const double scale = sqrt(sqrt_scale) * draw_scale;
     for(size_t i = 0; i < slots.size(); i++)
     {
         if(skip_unused && !slots[i].used)continue;
-
-        uint32_t color1, color2;  GLfloat radius = 1;
-        uint32_t alpha = (int(i) == slot ? 0x44000000 : 0x22000000);
+        uint32_t alpha = (int(i) == slot ? 0x66000000 : 0x22000000);
         switch(slots[i].type)
         {
-        case Slot::claw:   color1 = color2 = alpha | 0xFF0000;  radius = slots[i].radius * scale;  break;
-        case Slot::eye:    color1 = color2 = alpha | 0x00FF00;  radius = slots[i].radius * scale;  break;
-        case Slot::radar:  color1 = alpha | 0x00FFFF;  color2 = 0x00FFFF;  break;
-        default:  continue;
-        }
+        case Slot::claw:
+            data_sector.emplace_back(*cr, slots[i].angle1, slots[i].angle2,
+                slots[i].radius * scale, alpha | 0xFF0000, false);  break;
 
-        data.emplace_back(*cr, slots[i].angle1, slots[i].angle2, radius, color1, color2);
+        case Slot::leg:
+            {
+                uint32_t index = input_mapping[i], color = 0xFF00FF;
+                if(index != uint32_t(-1) && cr->input[index])
+                {
+                    alpha *= 2;  color = 0xFFFFFF;
+                }
+                data_leg.emplace_back(*cr, slots[i].angle1, slots[i].base + 1, alpha | color);  break;
+            }
+
+        case Slot::eye:
+            data_sector.emplace_back(*cr, slots[i].angle1, slots[i].angle2,
+                slots[i].radius * scale, alpha | 0x00FF00, false);  break;
+
+        case Slot::radar:
+            data_sector.emplace_back(*cr, slots[i].angle1, slots[i].angle2,
+                1, alpha | 0x00FFFF, true);  break;
+
+        default:
+            continue;
+        }
     }
 
-    glBindBuffer(GL_ARRAY_BUFFER, buf);
-    glBufferData(GL_ARRAY_BUFFER, data.size() * sizeof(SectorData), data.data(), GL_DYNAMIC_DRAW);
-    size = data.size();
+    glBindBuffer(GL_ARRAY_BUFFER, buf_sector);
+    glBufferData(GL_ARRAY_BUFFER, data_sector.size() * sizeof(SectorData), data_sector.data(), GL_DYNAMIC_DRAW);
+    size_sector = data_sector.size();
+
+    glBindBuffer(GL_ARRAY_BUFFER, buf_leg);
+    glBufferData(GL_ARRAY_BUFFER, data_leg.size() * sizeof(LegData), data_leg.data(), GL_DYNAMIC_DRAW);
+    size_leg = data_leg.size();
 }

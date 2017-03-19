@@ -110,6 +110,7 @@ namespace Gui
 
 
 constexpr double draw_scale = 1.0 / tile_size;
+constexpr double speed_scale = 1.0 / 512;
 
 
 struct Vertex
@@ -171,11 +172,23 @@ struct SectorData
     GLubyte angle, delta;
     uint32_t color1, color2;
 
-    SectorData(const Creature &cr, angle_t angle1, angle_t angle2,
-        GLfloat radius, uint32_t color1, uint32_t color2) :
+    SectorData(const Creature &cr, angle_t angle1, angle_t angle2, GLfloat radius, uint32_t color, bool fade) :
         x(cr.pos.x * draw_scale), y(cr.pos.y * draw_scale), rad(radius),
         angle(angle_t(cr.angle + angle1)), delta(angle_t(angle2 - angle1 - 1)),
-        color1(color1), color2(color2)
+        color1(color), color2(fade ? color & 0xFFFFFF : color)
+    {
+    }
+};
+
+struct LegData
+{
+    GLfloat x, y, speed;
+    GLubyte angle;
+    uint32_t color;
+
+    LegData(const Creature &cr, angle_t angle, uint32_t speed, uint32_t color) :
+        x(cr.pos.x * draw_scale), y(cr.pos.y * draw_scale), speed(speed * speed_scale),
+        angle(angle_t(cr.angle + angle)), color(color)
     {
     }
 };
