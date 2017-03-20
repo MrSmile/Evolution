@@ -360,6 +360,8 @@ struct Creature
     uint32_t passive_energy;
     uint32_t energy, max_energy, passive_cost;
     uint32_t total_life, max_life, damage;
+    uint64_t creature_vis_r2[f_creature];
+    uint64_t food_vis_r2[2], claw_r2;
     Detector father;
     uint8_t flags;
 
@@ -386,6 +388,7 @@ struct Creature
     Creature(const Creature &) = delete;
     Creature &operator = (const Creature &) = delete;
 
+    void update_max_visibility(uint8_t vis_flags, uint64_t r2);
     Slot::Type append_slot(const Config &config, const GenomeProcessor::SlotData &slot);
     static void calc_mapping(const GenomeProcessor &proc, std::vector<uint32_t> &mapping);
     Creature(const Config &config, Genome &genome, const GenomeProcessor &proc,
@@ -396,8 +399,8 @@ struct Creature
         uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
 
     void pre_process(const Config &config);
-    void update_view(uint8_t flags, uint64_t r2, angle_t test);
-    void process_detectors(Creature *cr, uint64_t r2, angle_t dir);
+    void update_view(uint8_t flags, uint64_t r2, angle_t dir);
+    void update_damage(Creature *cr, uint64_t r2, angle_t dir);
     static void process_detectors(Creature *cr1, Creature *cr2);
     void process_food(std::vector<Food> &foods);
     void post_process();

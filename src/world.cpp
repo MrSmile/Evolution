@@ -712,6 +712,14 @@ Creature::Radar::Radar(const Config &config, const GenomeProcessor::SlotData &sl
     assert(slot.type == Slot::radar);
 }
 
+void Creature::update_max_visibility(uint8_t vis_flags, uint64_t r2)
+{
+    for(int i = 0; i < f_creature; i++)if(vis_flags & (f_creature | i))
+        creature_vis_r2[i] = std::max(creature_vis_r2[i], r2);
+    if(vis_flags & f_grass)food_vis_r2[0] = std::max(food_vis_r2[0], r2);
+    if(vis_flags &  f_meat)food_vis_r2[1] = std::max(food_vis_r2[1], r2);
+}
+
 Slot::Type Creature::append_slot(const Config &config, const GenomeProcessor::SlotData &slot)
 {
     switch(slot.type)
@@ -738,10 +746,14 @@ Slot::Type Creature::append_slot(const Config &config, const GenomeProcessor::Sl
         hides.emplace_back(config, slot);  break;
 
     case Slot::eye:
-        eyes.emplace_back(config, slot);  break;
+        eyes.emplace_back(config, slot);
+        update_max_visibility(eyes.rbegin()->flags, eyes.rbegin()->rad_sqr);
+        break;
 
     case Slot::radar:
-        radars.emplace_back(config, slot);  break;
+        radars.emplace_back(config, slot);
+        update_max_visibility(radars.rbegin()->flags, max_r2);
+        break;
 
     default:
         assert(slot.type == Slot::link);  break;
@@ -788,7 +800,7 @@ Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &
     id(id), genome(std::move(genome)), pos(pos), angle(angle), passive_energy(proc.passive_cost.initial),
     energy(std::min(spawn_energy - proc.passive_cost.initial, proc.max_energy)), max_energy(proc.max_energy),
     passive_cost(proc.passive_cost.per_tick), total_life(proc.max_life), max_life(proc.max_life),
-    damage(0), father(config.base_r2), flags(f_creature)
+    damage(0), creature_vis_r2{}, food_vis_r2{}, father(config.base_r2), flags(f_creature)
 {
     uint32_t offset[Slot::invalid], n = 0;
     wombs.reserve(update_counters(proc.count, offset, n, Slot::womb));
@@ -877,25 +889,23 @@ void Creature::pre_process(const Config &config)
     damage = 0;
 }
 
-void Creature::update_view(uint8_t flags, uint64_t r2, angle_t test)
+void Creature::update_view(uint8_t flags, uint64_t r2, angle_t dir)
 {
+    dir -= angle;
     for(auto &eye : eyes)if(eye.flags & flags)
     {
-        if(angle_t(test - eye.angle) > eye.delta)continue;
+        if(angle_t(dir - eye.angle) > eye.delta)continue;
         if(r2 < eye.rad_sqr)eye.count++;
     }
     for(auto &radar : radars)if(radar.flags & flags)
     {
-        if(angle_t(test - radar.angle) > radar.delta)continue;
+        if(angle_t(dir - radar.angle) > radar.delta)continue;
         radar.min_r2 = std::min(radar.min_r2, r2);
     }
 }
 
-void Creature::process_detectors(Creature *cr, uint64_t r2, angle_t dir)
+void Creature::update_damage(Creature *cr, uint64_t r2, angle_t dir)
 {
-    father.update(r2, cr);  if(!r2)return;  // invalid angle
-
-    update_view(cr->flags, r2, dir - angle);
     angle_t test = angle_t(dir - cr->angle) ^ flip_angle;
     for(const auto &claw : cr->claws)if(claw.active)
     {
@@ -909,10 +919,19 @@ void Creature::process_detectors(Creature *cr1, Creature *cr2)
     int32_t dx = cr2->pos.x - cr1->pos.x;
     int32_t dy = cr2->pos.y - cr1->pos.y;
     uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
-    angle_t angle = calc_angle(dx, dy);
+    cr1->father.update(r2, cr2);
+    cr2->father.update(r2, cr1);
+    if(!r2)return;  // invalid angle
 
-    cr1->process_detectors(cr2, r2, angle);
-    cr2->process_detectors(cr1, r2, angle ^ flip_angle);
+    uint64_t view1 = cr1->creature_vis_r2[cr2->flags & f_signals];
+    uint64_t view2 = cr2->creature_vis_r2[cr1->flags & f_signals];
+    if(r2 >= std::max(std::max(view1, view2), std::max(cr1->claw_r2, cr2->claw_r2)))return;
+
+    angle_t angle = calc_angle(dx, dy);
+    if(r2 < view1)cr1->update_view(cr2->flags, r2, angle);
+    if(r2 < cr2->claw_r2)cr1->update_damage(cr2, r2, angle);
+    if(r2 < view2)cr2->update_view(cr1->flags, r2, angle ^ flip_angle);
+    if(r2 < cr1->claw_r2)cr2->update_damage(cr1, r2, angle ^ flip_angle);
 }
 
 void Creature::process_food(std::vector<Food> &foods)
@@ -925,7 +944,8 @@ void Creature::process_food(std::vector<Food> &foods)
         if(flags & f_eating)food.eater.update(r2, this);
         if(!r2)continue;  // invalid angle
 
-        update_view(food.type == Food::grass ? f_grass : f_meat, r2, calc_angle(dx, dy) - angle);
+        if(r2 >= food_vis_r2[food.type - Food::grass])continue;
+        update_view(food.type == Food::grass ? f_grass : f_meat, r2, calc_angle(dx, dy));
     }
 }
 
@@ -970,10 +990,13 @@ uint32_t Creature::execute_step(const Config &config)
     }
     if(damage)return total_energy;
 
-    int32_t dx = 0, dy = 0;  angle_t rot = 0;
+    int32_t dx = 0, dy = 0;  angle_t rot = 0;  claw_r2 = 0;
     uint32_t cost = passive_cost;  uint8_t *cur = input.data();
     for(auto &womb : wombs)if((womb.active = *cur++))cost += womb.energy;
-    for(auto &claw : claws)if((claw.active = *cur++))cost += claw.act_cost;
+    for(auto &claw : claws)if((claw.active = *cur++))
+    {
+        claw_r2 = std::max(claw_r2, claw.rad_sqr);  cost += claw.act_cost;
+    }
     for(auto &leg : legs)if(*cur++)
     {
         dx += r_sin(leg.dist_x4, angle + leg.angle + angle_90);
@@ -1032,9 +1055,11 @@ bool Creature::load(InStream &stream, uint32_t load_energy, uint64_t *buf)
     }
 
     uint8_t *cur = input.data();
+    flags = f_creature;  claw_r2 = 0;
     for(auto &womb : wombs)womb.active = *cur++;
-    for(auto &claw : claws)claw.active = *cur++;
-    cur += legs.size() + rotators.size();  flags = f_creature;
+    for(auto &claw : claws)if((claw.active = *cur++))
+        claw_r2 = std::max(claw_r2, claw.rad_sqr);
+    cur += legs.size() + rotators.size();
     for(auto &sig : signals)if(*cur++)flags |= sig.flags;
     return true;
 }
