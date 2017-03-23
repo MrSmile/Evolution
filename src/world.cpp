@@ -843,10 +843,12 @@ Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &
         for(uint32_t j = beg; j < end; j++)
         {
             const auto &link = proc.links[j];
-            uint32_t source = mapping[link.source];
-            if(source != uint32_t(-1))links.emplace_back(source, i, link.weight);
-            else if(proc.slots[link.source].neiro_state == GenomeProcessor::s_always_on)
-                neirons[i].act_level -= 255 * link.weight;
+            switch(proc.slots[link.source].neiro_state)
+            {
+            case GenomeProcessor::s_always_off:  break;
+            case GenomeProcessor::s_always_on:  neirons[i].act_level -= 255 * link.weight;  break;
+            default:  links.emplace_back(mapping[link.source], i, link.weight);
+            }
         }
     }
     assert(links.size() == proc.working_links);
@@ -1299,13 +1301,13 @@ const char version_string[] = "Evol0003";
 
 void World::init()
 {
-    config.order_x = config.order_y = 3;  // 8 x 8
+    config.order_x = config.order_y = 5;  // 32 x 32
     config.base_radius = tile_size / 64;
 
     config.chromosome_bits = 4;  // 16 = 8 pair
     config.genome_split_factor = ~(uint32_t(-1) / 1024);
-    config.chromosome_replace_factor = ~(uint32_t(-1) / 256);
-    config.chromosome_copy_prob = ~(uint32_t(-1) / 256);
+    config.chromosome_replace_factor = ~(uint32_t(-1) / 64);
+    config.chromosome_copy_prob = ~(uint32_t(-1) / 1024);
     config.bit_mutate_factor = ~(uint32_t(-1) / 1024);
 
     config.slot_bits = 6;  // 64 slots

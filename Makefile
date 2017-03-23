@@ -1,7 +1,7 @@
 
 CXX = g++
 D_FLAGS = -g -O0 -DDEBUG
-R_FLAGS = -g -Ofast -flto -mtune=native -DNDEBUG
+R_FLAGS = -g -Ofast -flto -mtune=native
 FLAGS = -std=c++11 -Wall -Wno-parentheses -Ibuild -DBUILTIN
 LIBS = -lSDL2 -lGL -lepoxy
 
