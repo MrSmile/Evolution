@@ -1192,13 +1192,19 @@ void World::process_tile_pair(Tile &tile1, Tile &tile2)
         for(Creature *cr1 = tile1.first; cr1; cr1 = cr1->next)
             for(Creature *cr2 = cr1->next; cr2; cr2 = cr2->next)
                 Creature::process_detectors(cr1, cr2);
+
+        for(Creature *cr = tile1.first; cr; cr = cr->next)
+            cr->process_food(tile2.foods);
+
+        for(size_t i = tile1.spawn_start; i < tile1.foods.size(); i++)
+            tile1.foods[i].check_grass(config, tile2.foods.data(), tile2.spawn_start);
+
+        return;
     }
-    else
-    {
-        for(Creature *cr1 = tile1.first; cr1; cr1 = cr1->next)
-            for(Creature *cr2 = tile2.first; cr2; cr2 = cr2->next)
-                Creature::process_detectors(cr1, cr2);
-    }
+
+    for(Creature *cr1 = tile1.first; cr1; cr1 = cr1->next)
+        for(Creature *cr2 = tile2.first; cr2; cr2 = cr2->next)
+            Creature::process_detectors(cr1, cr2);
 
     for(Creature *cr = tile1.first; cr; cr = cr->next)
         cr->process_food(tile2.foods);
