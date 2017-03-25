@@ -2,7 +2,7 @@
 CXX = g++
 D_FLAGS = -g -O0 -DDEBUG
 R_FLAGS = -g -Ofast -flto -mtune=native -DNDEBUG
-FLAGS = -std=c++11 -Wall -Wno-parentheses -Ibuild -DBUILTIN
+FLAGS = -std=c++11 -Wall -Wno-parentheses -Wno-switch -Ibuild -DBUILTIN
 LIBS = -lSDL2 -lGL -lepoxy
 
 SOURCES = math.cpp hash.cpp stream.cpp world.cpp graph.cpp selection.cpp main.cpp

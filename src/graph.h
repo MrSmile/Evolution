@@ -112,7 +112,7 @@ class Representation
 
     static const PassInfo pass_info[pass_count];
 
-    const World &world;
+    World &world;
     Camera cam;  HitTest move;
     GLuint prog[pass_count], tex_gui, tex_panel;
     GLint i_transform[prog_count], i_sel, i_size, i_gui, i_panel;
@@ -135,7 +135,7 @@ class Representation
     bool select_slot(List list, int y);
 
 public:
-    explicit Representation(const World &world, SDL_Window *window);
+    explicit Representation(World &world, SDL_Window *window);
     ~Representation();
 
     void resize(int w, int h);

@@ -5,6 +5,9 @@
 
 #include "math.h"
 #include <vector>
+#include <thread>
+#include <condition_variable>
+#include <mutex>
 
 
 
@@ -81,12 +84,12 @@ struct Creature;
 struct Detector
 {
     uint64_t min_r2, id;
-    Creature *target;
+    const Creature *target;
 
     Detector() = default;
     explicit Detector(uint64_t r2);
     void reset(uint64_t r2);
-    void update(uint64_t r2, Creature *cr);
+    void update(uint64_t r2, const Creature *cr);
 };
 
 
@@ -109,6 +112,7 @@ struct Food
     Food() = default;
     Food(const Config &config, Type type, const Position &pos);
     Food(const Config &config, const Food &food);
+    void set(const Config &config, const Food &food);
 
     void check_grass(const Config &config, const Food *food, size_t n);
 
@@ -358,6 +362,7 @@ struct Creature
     Position pos;
     angle_t angle;
     uint32_t passive_energy;
+    mutable uint32_t food_energy;
     uint32_t energy, max_energy, passive_cost;
     uint32_t total_life, max_life, damage;
     uint64_t creature_vis_r2[f_creature];
@@ -399,10 +404,11 @@ struct Creature
         uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
 
     void pre_process(const Config &config);
-    void update_view(uint8_t flags, uint64_t r2, angle_t dir);
-    void update_damage(Creature *cr, uint64_t r2, angle_t dir);
-    static void process_detectors(Creature *cr1, Creature *cr2);
-    void process_food(std::vector<Food> &foods);
+    void update_view(uint8_t tg_flags, uint64_t r2, angle_t dir);
+    void update_damage(const Creature *cr, uint64_t r2, angle_t dir);
+    void process_food(const std::vector<Food> &foods);
+    void eat_food(std::vector<Food> &foods) const;
+    void process_detectors(const Creature *cr);
     void post_process();
 
     uint32_t execute_step(const Config &config);
@@ -413,46 +419,190 @@ struct Creature
 };
 
 
-struct World
+struct TileLayout
 {
-    struct Tile
+    struct Reference
     {
-        Random rand;
-        std::vector<Food> foods;
-        Creature *first, **last;
-        size_t spawn_start;
+        uint32_t group, index;
+    };
 
-        Tile() : first(nullptr), last(&first)
+    struct TileDesc : public Reference
+    {
+        uint32_t neighbors[9];
+        Reference refs[9];
+        int ref_count;
+    };
+
+    struct GroupDesc
+    {
+        uint32_t tile_count, ref_count;
+
+        GroupDesc() : tile_count(0), ref_count(0)
+        {
+        }
+    };
+
+    struct Offsets
+    {
+        uint32_t pos[3];
+        int8_t offs[3];
+
+        Offsets(uint32_t p1, int8_t n1, uint32_t p2, int8_t n2, uint32_t p3, int8_t n3) :
+            pos{p1, p2, p3}, offs{n1, n2, n3}
         {
         }
 
-        Tile(uint64_t seed, size_t index);
-        Tile(const Config &config, const Tile &old, size_t &total_food, size_t reserve);
+        Offsets(uint32_t center, uint32_t step, int8_t n) :
+            pos{center - step, center, center + step}, offs{n, 0, int8_t(-n)}
+        {
+        }
+    };
 
-        bool load(const Config &config, InStream &stream, uint32_t x, uint32_t y,
-            uint64_t next_id, size_t &total_food, size_t &total_creature, uint64_t *buf);
+    uint32_t size_x, size_y;
+    std::vector<TileDesc> tiles;
+    std::vector<GroupDesc> groups;
+
+    TileLayout(uint32_t size_x, uint32_t size_y, uint32_t group_count);
+    void process_tile(TileDesc &cur, const Offsets &offs_x, const Offsets &offs_y);
+    void process_line(uint32_t pos, const Offsets &offs_y);
+    void build_layout();
+};
+
+
+struct FoodData;
+struct CreatureData;
+struct Context;
+
+struct TileGroup
+{
+    typedef TileLayout::Reference Reference;
+
+    struct TileBuffer
+    {
+        std::vector<Food> foods;
+        Creature *first, **last;
+        uint32_t food_count, creature_count;
+
+        void append(Creature *cr)
+        {
+            *last = cr;  last = &cr->next;  creature_count++;
+        }
+    };
+
+    struct Tile : public TileBuffer
+    {
+        uint32_t x, y;
+        uint32_t neighbors[9];
+        Reference refs[9];
+        int ref_count;
+
+        Random rand;
+        uint32_t spawn_start;
+        uint32_t children_count;
+        uint64_t id_offset;  // TODO: memory layout
+
+        Tile();
+        ~Tile();
+        void init(const TileLayout::TileDesc &desc);
+
+        void process_detectors(const Config &config,
+            const std::vector<TileGroup> &groups, const Reference &ref);
+        void update(const Config &config, uint64_t id, const Creature *&sel,
+            FoodData *food_buf, CreatureData *creature_buf) const;
+        bool hit_test(const Position pos, uint64_t max_r2, const Creature *&sel, uint64_t prev_id) const;
+
+        bool load(const Config &config, InStream &stream, uint64_t next_id, uint64_t *buf);
         void save(OutStream &stream, uint64_t *buf) const;
     };
 
 
-    Config config;
-    uint64_t current_time;
-    std::vector<Tile> tiles;
-    size_t total_food_count, total_creature_count;
-    size_t spawn_per_tile;
     uint64_t next_id;
+    std::vector<Tile> tiles;
+    std::vector<TileBuffer> buffers;
 
 
-    ~World();
+    void alloc(const TileLayout::GroupDesc &desc);
 
-    size_t tile_index(Position &pos) const;
-    void spawn_grass(Tile &tile, uint32_t x, uint32_t y);
-    void spawn_meat(Tile &tile, Position pos, uint32_t energy);
-    void process_tile_pair(Tile &tile1, Tile &tile2);
-    void process_detectors();
+    uint32_t neighbor_index(const Config &config, const Tile &tile, Position &pos);
+    void spawn_grass(const Config &config, Tile &tile);
+    void spawn_meat(const Config &config, Tile &tile, Position pos, uint32_t energy);
+
+    void execute_step(const Config &config);
+    void consolidate(const std::vector<Reference> &layout, std::vector<TileGroup> &groups);
+    void process_detectors(const Config &config,
+        const std::vector<Reference> &layout, const std::vector<TileGroup> &groups);
+
+    const Creature *update(const Config &config, uint64_t id,
+        FoodData *food_buf, const std::vector<size_t> &food_offs,
+        CreatureData *creature_buf, const std::vector<size_t> &creature_offs) const;
+
+    static void thread_proc(Context *context, uint32_t index);
+};
+
+
+struct Context
+{
+    typedef TileLayout::Reference Reference;
+
+    enum Command
+    {
+        c_none, c_step, c_draw, c_stop
+    };
+
+    Config config;
+    std::vector<Reference> layout;
+    std::vector<TileGroup> groups;
+
+    FoodData *food_buf;
+    CreatureData *creature_buf;
+    std::vector<size_t> food_offs, creature_offs;
+    uint64_t current_time, sel_id;
+    const Creature *sel;
+
+    std::mutex mutex;
+    std::condition_variable cond_cmd, cond_work;
+    uint32_t stage;  Command cmd;
+
+    void start();
+    void execute(Command new_cmd);
+    Command first_wait(uint32_t &target);
+    void barrier(uint32_t &target);
+    Command end_step(uint32_t &target);
+    Command end_draw(uint32_t &target, const Creature *cr);
+};
+
+
+struct World : public Context
+{
+    typedef TileLayout::Reference Reference;
+    typedef TileGroup::Tile Tile;
+
+    void init(uint32_t group_count);
+    void build_layout(uint32_t group_count);
+
+    void start();
     void next_step();
+    void stop();
 
-    void init();
-    bool load(InStream &stream);
+    void count_objects();
+    const Creature *update(FoodData *food_buf, CreatureData *creature_buf, uint64_t sel_id) const;
+    const Creature *hit_test(const Position &pos, uint32_t rad, uint64_t prev_id) const;
+
+    bool load(InStream &stream, uint32_t group_count);
     void save(OutStream &stream) const;
+
+    size_t food_total() const
+    {
+        return *food_offs.rbegin();
+    }
+
+    size_t creature_total() const
+    {
+        return *creature_offs.rbegin();
+    }
+
+    const Tile &get_tile(uint32_t index) const
+    {
+        return groups[layout[index].group].tiles[layout[index].index];
+    }
 };

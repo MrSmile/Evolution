@@ -1,7 +1,7 @@
 // world.cpp : world mechanics implementation
 //
 
-#include "world.h"
+#include "video.h"
 #include "stream.h"
 #include <algorithm>
 #include <cassert>
@@ -113,7 +113,7 @@ void Detector::reset(uint64_t r2)
     min_r2 = r2;  id = 0;  target = nullptr;
 }
 
-void Detector::update(uint64_t r2, Creature *cr)
+void Detector::update(uint64_t r2, const Creature *cr)
 {
     if(r2 > min_r2)return;
     if(r2 == min_r2 && cr->id > id)return;
@@ -132,11 +132,16 @@ Food::Food(const Config &config, const Food &food) : Food(config, food.type > sp
 {
 }
 
+void Food::set(const Config &config, const Food &food)
+{
+    type = food.type > sprout ? food.type : grass;
+    pos = food.pos;  eater.reset(config.base_r2);
+}
+
 
 void Food::check_grass(const Config &config, const Food *food, size_t n)
 {
-    if(type != sprout)return;
-
+    assert(type == sprout);
     for(size_t i = 0; i < n; i++)if(food[i].type == grass)
     {
         int32_t dx = pos.x - food[i].pos.x;
@@ -796,8 +801,8 @@ void Creature::calc_mapping(const GenomeProcessor &proc, std::vector<uint32_t> &
 }
 
 Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &proc,
-    uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy) :
-    id(id), genome(std::move(genome)), pos(pos), angle(angle), passive_energy(proc.passive_cost.initial),
+    uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy) : id(id),
+    genome(std::move(genome)), pos(pos), angle(angle), passive_energy(proc.passive_cost.initial),  food_energy(0),
     energy(std::min(spawn_energy - proc.passive_cost.initial, proc.max_energy)), max_energy(proc.max_energy),
     passive_cost(proc.passive_cost.per_tick), total_life(proc.max_life), max_life(proc.max_life),
     damage(0), creature_vis_r2{}, food_vis_r2{}, father(config.base_r2), flags(f_creature)
@@ -855,10 +860,12 @@ Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &
         for(uint32_t j = beg; j < end; j++)
         {
             const auto &link = proc.links[j];
-            uint32_t source = mapping[link.source];
-            if(source != uint32_t(-1))links.emplace_back(source, i, link.weight);
-            else if(proc.slots[link.source].neiro_state == GenomeProcessor::s_always_on)
-                neirons[i].act_level -= 255 * link.weight;
+            switch(proc.slots[link.source].neiro_state)
+            {
+            case GenomeProcessor::s_always_off:  break;
+            case GenomeProcessor::s_always_on:  neirons[i].act_level -= 255 * link.weight;  break;
+            default:  links.emplace_back(mapping[link.source], i, link.weight);
+            }
         }
     }
     assert(links.size() == proc.working_links);
@@ -889,64 +896,70 @@ void Creature::pre_process(const Config &config)
     damage = 0;
 }
 
-void Creature::update_view(uint8_t flags, uint64_t r2, angle_t dir)
+void Creature::update_view(uint8_t tg_flags, uint64_t r2, angle_t dir)
 {
     dir -= angle;
-    for(auto &eye : eyes)if(eye.flags & flags)
+    for(auto &eye : eyes)if(eye.flags & tg_flags)
     {
         if(angle_t(dir - eye.angle) > eye.delta)continue;
         if(r2 < eye.rad_sqr)eye.count++;
     }
-    for(auto &radar : radars)if(radar.flags & flags)
+    for(auto &radar : radars)if(radar.flags & tg_flags)
     {
         if(angle_t(dir - radar.angle) > radar.delta)continue;
         radar.min_r2 = std::min(radar.min_r2, r2);
     }
 }
 
-void Creature::update_damage(Creature *cr, uint64_t r2, angle_t dir)
+void Creature::update_damage(const Creature *cr, uint64_t r2, angle_t dir)
 {
     angle_t test = angle_t(dir - cr->angle) ^ flip_angle;
-    for(const auto &claw : cr->claws)if(claw.active)
+    for(auto &claw : cr->claws)if(claw.active)
     {
         if(angle_t(test - claw.angle) > claw.delta)continue;
         if(r2 < claw.rad_sqr)damage += claw.damage;
     }
 }
 
-void Creature::process_detectors(Creature *cr1, Creature *cr2)
-{
-    int32_t dx = cr2->pos.x - cr1->pos.x;
-    int32_t dy = cr2->pos.y - cr1->pos.y;
-    uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
-    cr1->father.update(r2, cr2);
-    cr2->father.update(r2, cr1);
-    if(!r2)return;  // invalid angle
-
-    uint64_t view1 = cr1->creature_vis_r2[cr2->flags & f_signals];
-    uint64_t view2 = cr2->creature_vis_r2[cr1->flags & f_signals];
-    if(r2 >= std::max(std::max(view1, view2), std::max(cr1->claw_r2, cr2->claw_r2)))return;
-
-    angle_t angle = calc_angle(dx, dy);
-    if(r2 < view1)cr1->update_view(cr2->flags, r2, angle);
-    if(r2 < cr2->claw_r2)cr1->update_damage(cr2, r2, angle);
-    if(r2 < view2)cr2->update_view(cr1->flags, r2, angle ^ flip_angle);
-    if(r2 < cr1->claw_r2)cr2->update_damage(cr1, r2, angle ^ flip_angle);
-}
-
-void Creature::process_food(std::vector<Food> &foods)
+void Creature::process_food(const std::vector<Food> &foods)
 {
     for(auto &food : foods)if(food.type > Food::sprout)
     {
         int32_t dx = food.pos.x - pos.x;
         int32_t dy = food.pos.y - pos.y;
         uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
-        if(flags & f_eating)food.eater.update(r2, this);
         if(!r2)continue;  // invalid angle
 
         if(r2 >= food_vis_r2[food.type - Food::grass])continue;
         update_view(food.type == Food::grass ? f_grass : f_meat, r2, calc_angle(dx, dy));
     }
+}
+
+void Creature::eat_food(std::vector<Food> &foods) const
+{
+    assert(flags & f_eating);
+    for(auto &food : foods)if(food.type > Food::sprout)
+    {
+        int32_t dx = food.pos.x - pos.x;
+        int32_t dy = food.pos.y - pos.y;
+        uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
+        food.eater.update(r2, this);
+    }
+}
+
+void Creature::process_detectors(const Creature *cr)
+{
+    int32_t dx = cr->pos.x - pos.x;
+    int32_t dy = cr->pos.y - pos.y;
+    uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
+    father.update(r2, cr);  if(!r2)return;  // invalid angle
+
+    uint64_t view = creature_vis_r2[cr->flags & f_signals];
+    if(r2 >= std::max(view, cr->claw_r2))return;
+
+    angle_t angle = calc_angle(dx, dy);
+    if(r2 < view)update_view(cr->flags, r2, angle);
+    if(r2 < cr->claw_r2)update_damage(cr, r2, angle);
 }
 
 void Creature::post_process()
@@ -969,8 +982,9 @@ void Creature::post_process()
 
 uint32_t Creature::execute_step(const Config &config)
 {
-    energy = std::min(energy, max_energy);
+    energy = std::min(energy + food_energy, max_energy);
     uint32_t total_energy = passive_energy + energy;
+    food_energy = 0;
 
     flags = f_creature;
     for(auto &neiron : neirons)neiron.level = 0;
@@ -1085,41 +1099,370 @@ void Creature::save(OutStream &stream, uint64_t *buf) const
 
 
 
-// World struct
+// TileLayout struct
 
-World::Tile::Tile(uint64_t seed, size_t index) :
-    rand(seed, index), first(nullptr), last(&first), spawn_start(0)
+TileLayout::TileLayout(uint32_t size_x, uint32_t size_y, uint32_t group_count) :
+    size_x(size_x), size_y(size_y), tiles(size_x * size_y), groups(group_count)
 {
+    Random rand(clock(), 0);
+    for(size_t i = 0; i < tiles.size(); i++)
+    {
+        uint32_t group = rand.uniform(group_count);  // DEBUG
+
+        tiles[i].group = group;
+        tiles[i].index = groups[group].tile_count++;
+        tiles[i].ref_count = 0;
+    }
 }
 
-World::Tile::Tile(const Config &config, const Tile &old, size_t &total_food, size_t reserve) :
-    rand(old.rand), first(nullptr), last(&first)
+void TileLayout::process_tile(TileDesc &cur, const Offsets &offs_x, const Offsets &offs_y)
 {
-    foods.reserve(old.foods.size() + reserve);
-    for(const auto &food : old.foods)
-        if(food.eater.target)food.eater.target->energy += config.food_energy;
-        else if(food.type)foods.emplace_back(config, food);
-    total_food += spawn_start = foods.size();
+    uint32_t prev = -1, ref;
+    for(int i = 0; i < 3; i++)for(int j = 0; j < 3; j++)
+    {
+        TileDesc &tile = tiles[offs_y.pos[i] + offs_x.pos[j]];
+        if(prev != tile.group)
+        {
+            ref = groups[prev = tile.group].ref_count++;
+            cur.refs[cur.ref_count++] = {prev, ref};
+        }
+        tile.neighbors[4 + offs_y.offs[i] + offs_x.offs[j]] = ref;
+    }
+}
+
+void TileLayout::process_line(uint32_t pos, const Offsets &offs_y)
+{
+    uint32_t n = size_x - 1;
+    process_tile(tiles[pos], Offsets(0, 0, 1, -1, n, 1), offs_y);
+    for(uint32_t x = 1; x < n; x++)
+        process_tile(tiles[pos + x], Offsets(x - 1, 1, x, 0, x + 1, -1), offs_y);
+    process_tile(tiles[pos + n], Offsets(0, -1, n - 1, 1, n, 0), offs_y);
+}
+
+void TileLayout::build_layout()
+{
+    uint32_t n = size_x * (size_y - 1);
+    process_line(0, Offsets(0, 0, size_x, -3, n, 3));
+    for(uint32_t pos = size_x; pos < n; pos += size_x)
+        process_line(pos, Offsets(pos - size_x, 3, pos, 0, pos + size_x, -3));
+    process_line(n, Offsets(0, -3, n - size_x, 3, n, 0));
 }
 
 
-bool World::Tile::load(const Config &config, InStream &stream, uint32_t x, uint32_t y,
-    uint64_t next_id, size_t &total_food, size_t &total_creature, uint64_t *buf)
+
+// TileGroup struct
+
+void TileGroup::alloc(const TileLayout::GroupDesc &desc)
+{
+    tiles.resize(desc.tile_count);  buffers.resize(desc.ref_count);
+}
+
+TileGroup::Tile::Tile()
+{
+    first = nullptr;  last = &first;
+}
+
+TileGroup::Tile::~Tile()
+{
+    for(Creature *ptr = first; ptr;)
+    {
+        Creature *cr = ptr;  ptr = ptr->next;  delete cr;
+    }
+}
+
+void TileGroup::Tile::init(const TileLayout::TileDesc &desc)
+{
+    std::memcpy(neighbors, desc.neighbors, sizeof(neighbors));
+    for(int i = 0; i < desc.ref_count; i++)refs[i] = desc.refs[i];
+    ref_count = desc.ref_count;
+}
+
+
+uint32_t TileGroup::neighbor_index(const Config &config, const Tile &tile, Position &pos)
+{
+    pos.x &= config.full_mask_x;
+    pos.y &= config.full_mask_y;
+    uint32_t dx = (uint32_t(pos.x >> tile_order) - tile.x + 1) & config.mask_x;
+    uint32_t dy = (uint32_t(pos.y >> tile_order) - tile.y + 1) & config.mask_y;
+    assert(dx < 3 && dy < 3);
+
+    return tile.neighbors[dx + 3 * dy];
+}
+
+void TileGroup::spawn_grass(const Config &config, Tile &tile)  // TODO: tile relative position
+{
+    uint64_t offs_x = uint64_t(tile.x) << tile_order;
+    uint64_t offs_y = uint64_t(tile.y) << tile_order;
+    uint32_t n = tile.rand.poisson(config.exp_sprout_per_tile);
+    for(uint32_t k = 0; k < n; k++)
+    {
+        uint64_t xx = (tile.rand.uint32() & tile_mask) | offs_x;
+        uint64_t yy = (tile.rand.uint32() & tile_mask) | offs_y;
+        buffers[tile.neighbors[4]].foods.emplace_back(config, Food::sprout, Position{xx, yy});
+    }
+    for(size_t i = 0; i < tile.foods.size(); i++)
+    {
+        if(tile.foods[i].type != Food::grass)continue;
+        uint32_t n = tile.rand.poisson(config.exp_sprout_per_grass);
+        for(uint32_t k = 0; k < n; k++)
+        {
+            Position pos = tile.foods[i].pos;
+            angle_t angle = tile.rand.uint32();
+            pos.x += r_sin(config.sprout_dist_x4, angle + angle_90);
+            pos.y += r_sin(config.sprout_dist_x4, angle);
+
+            uint32_t index = neighbor_index(config, tile, pos);
+            buffers[index].foods.emplace_back(config, Food::sprout, pos);
+        }
+    }
+}
+
+void TileGroup::spawn_meat(const Config &config, Tile &tile, Position pos, uint32_t energy)
+{
+    if(energy < config.food_energy)return;
+    for(energy -= config.food_energy;;)
+    {
+        auto &buf = buffers[neighbor_index(config, tile, pos)];
+        buf.foods.emplace_back(config, Food::meat, pos);  buf.food_count++;
+        if(energy < config.food_energy)return;  energy -= config.food_energy;
+
+        angle_t angle = tile.rand.uint32();
+        pos.x += r_sin(config.meat_dist_x4, angle + angle_90);
+        pos.y += r_sin(config.meat_dist_x4, angle);
+    }
+}
+
+void TileGroup::execute_step(const Config &config)
+{
+    for(auto &buf : buffers)
+    {
+        buf.foods.clear();  buf.last = &buf.first;
+        buf.food_count = buf.creature_count = 0;
+    }
+
+    for(auto &tile : tiles)
+    {
+        auto &foods = tile.foods;  size_t n = 0;
+        for(size_t i = 0; i < foods.size(); i++)
+            if(!foods[i].eater.target && foods[i].type)foods[n++].set(config, foods[i]);
+        foods.resize(tile.spawn_start = tile.food_count = n);
+        spawn_grass(config, tile);
+
+        uint64_t id = next_id;
+        Creature *ptr = tile.first;
+        tile.first = nullptr;  tile.last = &tile.first;
+        while(ptr)
+        {
+            Creature *cr = ptr;  ptr = ptr->next;
+
+            Position prev_pos = cr->pos;
+            angle_t prev_angle = cr->angle;
+            uint32_t dead_energy = cr->execute_step(config);
+            if(dead_energy)
+            {
+                *tile.last = cr;  tile.last = &cr->next;  // potential father
+                spawn_meat(config, tile, prev_pos, dead_energy);  continue;
+            }
+
+            buffers[neighbor_index(config, tile, cr->pos)].append(cr);
+            for(const auto &womb : cr->wombs)if(womb.active)
+            {
+                Creature *child = Creature::spawn(config, tile.rand, *cr,
+                    id++, prev_pos, prev_angle ^ flip_angle, womb.energy);
+                uint32_t leftover = womb.energy;
+                if(child)
+                {
+                    leftover -= child->passive_energy + child->energy;
+                    buffers[tile.neighbors[4]].append(child);  // TODO: reorder children to end
+                }
+                spawn_meat(config, tile, prev_pos, leftover);
+            }
+        }
+        tile.children_count = id - next_id;  *tile.last = nullptr;
+    }
+}
+
+void TileGroup::consolidate(const std::vector<Reference> &layout, std::vector<TileGroup> &groups)
+{
+    uint64_t split = next_id, n = 0;
+    for(const auto &ref : layout)
+    {
+        if(groups.data() + ref.group == this)tiles[ref.index].id_offset = n;
+        n += groups[ref.group].tiles[ref.index].children_count;
+    }
+    next_id += n;
+
+    for(auto &tile : tiles)
+    {
+        size_t n = tile.foods.size();
+        for(int i = 0; i < tile.ref_count; i++)
+        {
+            const auto &ref = tile.refs[i];
+            n += groups[ref.group].buffers[ref.index].foods.size();
+        }
+        tile.foods.reserve(n);
+
+        for(Creature *ptr = tile.first; ptr;)
+        {
+            Creature *cr = ptr;  ptr = ptr->next;  delete cr;
+        }
+
+        auto &buf = buffers[tile.neighbors[4]];  *buf.last = nullptr;
+        for(Creature *cr = buf.first; cr; cr = cr->next)
+            if(cr->id >= split)cr->id += tile.id_offset;  // TODO: reorder children to end
+
+        tile.last = &tile.first;  tile.creature_count = 0;
+        for(int i = 0; i < tile.ref_count; i++)
+        {
+            const auto &ref = tile.refs[i];
+            auto &buf = groups[ref.group].buffers[ref.index];
+
+            tile.foods.insert(tile.foods.end(), buf.foods.begin(), buf.foods.end());
+            tile.food_count += buf.food_count;
+
+            if(!buf.creature_count)continue;
+            *tile.last = buf.first;  tile.last = buf.last;
+            tile.creature_count += buf.creature_count;
+        }
+        *tile.last = nullptr;
+    }
+}
+
+
+void TileGroup::Tile::process_detectors(const Config &config,
+    const std::vector<TileGroup> &groups, const Reference &ref)
+{
+    const Tile &tile = groups[ref.group].tiles[ref.index];
+
+    for(Creature *cr = first; cr; cr = cr->next)
+    {
+        cr->process_food(tile.foods);
+        for(const Creature *tg = tile.first; tg; tg = tg->next)
+            if(tg != cr)cr->process_detectors(tg);
+    }
+
+    for(const Creature *tg = tile.first; tg; tg = tg->next)
+        if(tg->flags & Creature::f_eating)tg->eat_food(foods);
+
+    for(size_t i = spawn_start; i < foods.size(); i++)if(foods[i].type == Food::sprout)
+        foods[i].check_grass(config, tile.foods.data(), tile.spawn_start);
+}
+
+void TileGroup::process_detectors(const Config &config,
+    const std::vector<Reference> &layout, const std::vector<TileGroup> &groups)
+{
+    for(auto &tile : tiles)
+    {
+        uint32_t x = tile.x, y = tile.y;
+        uint32_t x1 = (x + 1) & config.mask_x, xm = (x - 1) & config.mask_x;
+        uint32_t y1 = (y + 1) & config.mask_y, ym = (y - 1) & config.mask_y;
+
+        for(Creature *cr = tile.first; cr; cr = cr->next)cr->pre_process(config);
+        tile.process_detectors(config, groups, layout[xm | (ym << config.order_x)]);
+        tile.process_detectors(config, groups, layout[x  | (ym << config.order_x)]);
+        tile.process_detectors(config, groups, layout[x1 | (ym << config.order_x)]);
+        tile.process_detectors(config, groups, layout[xm | (y  << config.order_x)]);
+        tile.process_detectors(config, groups, layout[x  | (y  << config.order_x)]);
+        tile.process_detectors(config, groups, layout[x1 | (y  << config.order_x)]);
+        tile.process_detectors(config, groups, layout[xm | (y1 << config.order_x)]);
+        tile.process_detectors(config, groups, layout[x  | (y1 << config.order_x)]);
+        tile.process_detectors(config, groups, layout[x1 | (y1 << config.order_x)]);
+        for(Creature *cr = tile.first; cr; cr = cr->next)cr->post_process();
+
+        for(auto &food : tile.foods)if(food.eater.target)
+            food.eater.target->food_energy += config.food_energy;  // TODO: atomic
+    }
+}
+
+
+void TileGroup::Tile::update(const Config &config, uint64_t id,
+    const Creature *&sel, FoodData *food_buf, CreatureData *creature_buf) const
+{
+    FoodData *food_ptr = food_buf;
+    for(const auto &food : foods)if(food.type > Food::sprout)
+        (food_ptr++)->set(config, food);
+    assert(food_ptr == food_buf + food_count);
+
+    CreatureData *creature_ptr = creature_buf;
+    for(const Creature *cr = first; cr; cr = cr->next)
+    {
+        if(cr->id == id)sel = cr;
+        (creature_ptr++)->set(config, *cr);
+    }
+    assert(creature_ptr == creature_buf + creature_count);
+}
+
+const Creature *TileGroup::update(const Config &config, uint64_t id,
+    FoodData *food_buf, const std::vector<size_t> &food_offs,
+    CreatureData *creature_buf, const std::vector<size_t> &creature_offs) const
+{
+    const Creature *sel = nullptr;
+    for(auto &tile : tiles)
+    {
+        uint32_t index = tile.x | (tile.y << config.order_x);
+        assert(food_offs[index + 1] - food_offs[index] == tile.food_count);
+        assert(creature_offs[index + 1] - creature_offs[index] == tile.creature_count);
+        tile.update(config, id, sel, food_buf + food_offs[index], creature_buf + creature_offs[index]);
+    }
+    return sel;
+}
+
+
+bool TileGroup::Tile::hit_test(const Position pos, uint64_t max_r2, const Creature *&sel, uint64_t prev_id) const
+{
+    for(const Creature *cr = first; cr; cr = cr->next)
+    {
+        int32_t dx = cr->pos.x - pos.x;
+        int32_t dy = cr->pos.y - pos.y;
+        uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
+        if(r2 >= max_r2)continue;
+
+        if(cr->id == prev_id && sel)return true;  sel = cr;
+    }
+    return false;
+}
+
+
+void TileGroup::thread_proc(Context *context, uint32_t index)
+{
+    uint32_t stage = context->groups.size();
+    TileGroup &group = context->groups[index];
+    for(Context::Command cmd = context->first_wait(stage);;)switch(cmd)
+    {
+    case Context::c_step:
+        group.execute_step(context->config);  context->barrier(stage);
+        group.consolidate(context->layout, context->groups);  context->barrier(stage);
+        group.process_detectors(context->config, context->layout, context->groups);
+        cmd = context->end_step(stage);  continue;
+
+    case Context::c_draw:
+        {
+            const Creature *sel = group.update(context->config, context->sel_id,
+                context->food_buf, context->food_offs, context->creature_buf, context->creature_offs);
+            cmd = context->end_draw(stage, sel);  continue;
+        }
+
+    default:
+        return;
+    }
+}
+
+
+bool TileGroup::Tile::load(const Config &config, InStream &stream, uint64_t next_id, uint64_t *buf)
 {
     assert(foods.empty() && !first);
     uint64_t offs_x = uint64_t(x) << tile_order;
     uint64_t offs_y = uint64_t(y) << tile_order;
 
     stream.assert_align(8);
-    uint32_t food_count, creature_count;
-    stream >> rand >> food_count >> creature_count;
+    stream >> rand >> spawn_start >> creature_count;
     if(!stream)return false;  // TODO: check counts
 
-    foods.resize(spawn_start = food_count);
+    foods.resize(spawn_start);  food_count = 0;
     for(auto &food : foods)
     {
         if(!food.load(config, stream, offs_x, offs_y))return false;
-        if(food.type > Food::sprout)total_food++;
+        if(food.type > Food::sprout)food_count++;
     }
 
     for(uint32_t i = 0; i < creature_count; i++)
@@ -1132,204 +1475,98 @@ bool World::Tile::load(const Config &config, InStream &stream, uint32_t x, uint3
         *last = cr;  last = &cr->next;
         cr->pos.x |= offs_x;  cr->pos.y |= offs_y;
     }
-    *last = nullptr;  total_creature += creature_count;  return true;
+    *last = nullptr;  return true;
 }
 
-void World::Tile::save(OutStream &stream, uint64_t *buf) const
+void TileGroup::Tile::save(OutStream &stream, uint64_t *buf) const
 {
     stream.assert_align(8);  stream << rand;
 
-    uint32_t food_count = 0, creature_count = 0;
-    for(auto &food : foods)if(food.type)food_count++;
-    for(Creature *cr = first; cr; cr = cr->next)creature_count++;
-    stream << food_count << creature_count;
+    uint32_t n = 0;
+    for(auto &food : foods)if(food.type)n++;
+    stream << n << creature_count;
 
     for(auto &food : foods)if(food.type)stream << food;
     for(Creature *cr = first; cr; cr = cr->next)cr->save(stream, buf);
 }
 
 
-World::~World()
+
+// Context struct
+
+void Context::start()
 {
-    for(auto &tile : tiles)for(Creature *ptr = tile.first; ptr;)
+    stage = 0;  cmd = c_none;
+}
+
+void Context::execute(Command new_cmd)
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    while(cmd)cond_cmd.wait(lock);  cmd = new_cmd;
+    cond_work.notify_all();
+}
+
+Context::Command Context::first_wait(uint32_t &target)
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    if(++stage == target)cond_cmd.notify_one();
+    else while(stage != target)cond_work.wait(lock);
+    while(!cmd)cond_work.wait(lock);
+    target += groups.size();
+    return cmd;
+}
+
+void Context::barrier(uint32_t &target)
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    if(++stage == target)cond_work.notify_all();
+    else while(stage != target)cond_work.wait(lock);
+    target += groups.size();
+}
+
+Context::Command Context::end_step(uint32_t &target)
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    assert(cmd == c_step);
+    if(++stage == target)
     {
-        Creature *cr = ptr;  ptr = ptr->next;  delete cr;
+        current_time++;  cmd = c_none;
+        cond_cmd.notify_one();
     }
+    else while(stage != target)cond_work.wait(lock);
+    while(!cmd)cond_work.wait(lock);
+    target += groups.size();
+    return cmd;
+}
+
+Context::Command Context::end_draw(uint32_t &target, const Creature *cr)
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    assert(cmd == c_draw);  if(cr)sel = cr;
+    if(++stage == target)
+    {
+        cmd = c_none;  cond_cmd.notify_one();
+    }
+    else while(stage != target)cond_work.wait(lock);
+    while(!cmd)cond_work.wait(lock);
+    target += groups.size();
+    return cmd;
 }
 
 
-size_t World::tile_index(Position &pos) const
-{
-    pos.x &= config.full_mask_x;  pos.y &= config.full_mask_y;
-    return (pos.x >> tile_order) | (size_t(pos.y >> tile_order) << config.order_x);
-}
 
-void World::spawn_grass(Tile &tile, uint32_t x, uint32_t y)
-{
-    uint64_t offs_x = uint64_t(x) << tile_order;
-    uint64_t offs_y = uint64_t(y) << tile_order;
-    uint32_t n = tile.rand.poisson(config.exp_sprout_per_tile);
-    for(uint32_t k = 0; k < n; k++)
-    {
-        uint64_t xx = (tile.rand.uint32() & tile_mask) | offs_x;
-        uint64_t yy = (tile.rand.uint32() & tile_mask) | offs_y;
-        tile.foods.emplace_back(config, Food::sprout, Position{xx, yy});
-    }
-    for(size_t i = 0; i < tile.spawn_start; i++)
-    {
-        if(tile.foods[i].type != Food::grass)continue;
-        uint32_t n = tile.rand.poisson(config.exp_sprout_per_grass);
-        for(uint32_t k = 0; k < n; k++)
-        {
-            Position pos = tile.foods[i].pos;
-            angle_t angle = tile.rand.uint32();
-            pos.x += r_sin(config.sprout_dist_x4, angle + angle_90);
-            pos.y += r_sin(config.sprout_dist_x4, angle);
-            size_t index = tile_index(pos);
-
-            tiles[index].foods.emplace_back(config, Food::sprout, pos);
-        }
-    }
-}
-
-void World::spawn_meat(Tile &tile, Position pos, uint32_t energy)
-{
-    if(energy < config.food_energy)return;
-    for(energy -= config.food_energy;;)
-    {
-        size_t index = tile_index(pos);  total_food_count++;
-        tiles[index].foods.emplace_back(config, Food::meat, pos);
-        if(energy < config.food_energy)return;
-        energy -= config.food_energy;
-
-        angle_t angle = tile.rand.uint32();
-        pos.x += r_sin(config.meat_dist_x4, angle + angle_90);
-        pos.y += r_sin(config.meat_dist_x4, angle);
-    }
-}
-
-void World::process_tile_pair(Tile &tile1, Tile &tile2)
-{
-    if(&tile1 == &tile2)
-    {
-        for(Creature *cr1 = tile1.first; cr1; cr1 = cr1->next)
-            for(Creature *cr2 = cr1->next; cr2; cr2 = cr2->next)
-                Creature::process_detectors(cr1, cr2);
-    }
-    else
-    {
-        for(Creature *cr1 = tile1.first; cr1; cr1 = cr1->next)
-            for(Creature *cr2 = tile2.first; cr2; cr2 = cr2->next)
-                Creature::process_detectors(cr1, cr2);
-    }
-
-    for(Creature *cr = tile1.first; cr; cr = cr->next)
-        cr->process_food(tile2.foods);
-
-    for(Creature *cr = tile2.first; cr; cr = cr->next)
-        cr->process_food(tile1.foods);
-
-    for(size_t i = tile1.spawn_start; i < tile1.foods.size(); i++)
-        tile1.foods[i].check_grass(config, tile2.foods.data(), tile2.spawn_start);
-
-    for(size_t i = tile2.spawn_start; i < tile2.foods.size(); i++)
-        tile2.foods[i].check_grass(config, tile1.foods.data(), tile1.spawn_start);
-}
-
-void World::process_detectors()
-{
-    size_t spawn = 0;
-    for(auto &tile : tiles)
-    {
-        *tile.last = nullptr;
-        spawn = std::max(spawn, tile.foods.size() - tile.spawn_start);
-        for(Creature *cr = tile.first; cr; cr = cr->next)
-            cr->pre_process(config);
-    }
-    spawn_per_tile = std::max(spawn_per_tile / 2, 2 * spawn + 1);
-
-    for(size_t i = 0; i < tiles.size(); i++)
-    {
-        uint32_t x = i & config.mask_x, y = i >> config.order_x;
-        uint32_t x1 = (x + 1) & config.mask_x, xm = (x - 1) & config.mask_x;
-        uint32_t y1 = (y + 1) & config.mask_y;
-
-        process_tile_pair(tiles[i], tiles[i]);
-        process_tile_pair(tiles[i], tiles[x1 | (y  << config.order_x)]);
-        process_tile_pair(tiles[i], tiles[xm | (y1 << config.order_x)]);
-        process_tile_pair(tiles[i], tiles[x  | (y1 << config.order_x)]);
-        process_tile_pair(tiles[i], tiles[x1 | (y1 << config.order_x)]);
-    }
-
-    for(auto &tile : tiles)
-        for(Creature *cr = tile.first; cr; cr = cr->next)
-            cr->post_process();
-}
-
-void World::next_step()
-{
-    std::vector<Tile> old;  old.reserve(tiles.size());  old.swap(tiles);
-
-    total_food_count = 0;
-    for(size_t i = 0; i < old.size(); i++)
-        tiles.emplace_back(config, old[i], total_food_count, spawn_per_tile);
-
-    total_creature_count = 0;
-    Creature *del_queue, **del_last = &del_queue;
-    for(size_t i = 0; i < old.size(); i++)
-    {
-        spawn_grass(tiles[i], i & config.mask_x, i >> config.order_x);
-
-        for(Creature *ptr = old[i].first; ptr;)
-        {
-            Creature *cr = ptr;  ptr = ptr->next;
-
-            Position prev_pos = cr->pos;
-            angle_t prev_angle = cr->angle;
-            uint32_t dead_energy = cr->execute_step(config);
-            if(dead_energy)
-            {
-                *del_last = cr;  del_last = &cr->next;  // potential father
-                spawn_meat(tiles[i], prev_pos, dead_energy);  continue;
-            }
-
-            size_t index = tile_index(cr->pos);
-            *tiles[index].last = cr;  tiles[index].last = &cr->next;  total_creature_count++;
-            for(const auto &womb : cr->wombs)if(womb.active)
-            {
-                Creature *child = Creature::spawn(config, tiles[i].rand, *cr,
-                    next_id++, prev_pos, prev_angle ^ flip_angle, womb.energy);
-                uint32_t leftover = womb.energy;
-                if(child)
-                {
-                    leftover -= child->passive_energy + child->energy;
-                    *tiles[i].last = child;  tiles[i].last = &child->next;  total_creature_count++;
-                }
-                spawn_meat(tiles[i], prev_pos, leftover);
-            }
-        }
-    }
-    *del_last = nullptr;
-    while(del_queue)
-    {
-        Creature *cr = del_queue;  del_queue = cr->next;  delete cr;
-    }
-    old.clear();
-
-    process_detectors();  current_time++;
-}
-
+// World struct
 
 const char version_string[] = "Evol0003";
 
-void World::init()
+void World::init(uint32_t group_count)
 {
     config.order_x = config.order_y = 5;  // 32 x 32
     config.base_radius = tile_size / 64;
 
     config.chromosome_bits = 4;  // 16 = 8 pair
     config.genome_split_factor = ~(uint32_t(-1) / 1024);
-    config.chromosome_replace_factor = ~(uint32_t(-1) / 256);
+    config.chromosome_replace_factor = ~(uint32_t(-1) / 64);
     config.chromosome_copy_prob = ~(uint32_t(-1) / 1024);
     config.bit_mutate_factor = ~(uint32_t(-1) / 1024);
 
@@ -1381,68 +1618,161 @@ void World::init()
     uint32_t exp_creature_gen = uint32_t(-1) >> 16;
 
 
-    spawn_per_tile = 4;  // TODO: config?
-
-    total_food_count = total_creature_count = 0;  next_id = 0;
-    size_t size = size_t(1) << (config.order_x + config.order_y);
-    tiles.reserve(size);  Genome init_genome(config);
-    for(size_t i = 0; i < size; i++)
+    build_layout(group_count);
+    Genome init_genome(config);  uint64_t next_id = 0;
+    for(size_t i = 0; i < layout.size(); i++)
     {
-        tiles.emplace_back(seed, i);
-        uint32_t x = i & config.mask_x, y = i >> config.order_x;
-        uint64_t offs_x = uint64_t(x) << tile_order;
-        uint64_t offs_y = uint64_t(y) << tile_order;
+        Tile &tile = groups[layout[i].group].tiles[layout[i].index];
+        tile.rand = Random(seed, i);
 
-        uint32_t n = tiles[i].rand.poisson(exp_grass_gen);
+        uint64_t offs_x = uint64_t(tile.x) << tile_order;
+        uint64_t offs_y = uint64_t(tile.y) << tile_order;
+
+        uint32_t n = tile.rand.poisson(exp_grass_gen);
         for(uint32_t k = 0; k < n; k++)
         {
-            uint64_t xx = (tiles[i].rand.uint32() & tile_mask) | offs_x;
-            uint64_t yy = (tiles[i].rand.uint32() & tile_mask) | offs_y;
-            tiles[i].foods.emplace_back(config, Food::grass, Position{xx, yy});
+            uint64_t xx = (tile.rand.uint32() & tile_mask) | offs_x;
+            uint64_t yy = (tile.rand.uint32() & tile_mask) | offs_y;
+            tile.foods.emplace_back(config, Food::grass, Position{xx, yy});
         }
-        total_food_count += tiles[i].spawn_start = n;
+        tile.spawn_start = tile.food_count = n;
 
-        n = tiles[i].rand.poisson(exp_creature_gen);
+        n = tile.rand.poisson(exp_creature_gen);
         for(uint32_t k = 0; k < n; k++)
         {
-            angle_t angle = tiles[i].rand.uint32();
-            uint64_t xx = (tiles[i].rand.uint32() & tile_mask) | offs_x;
-            uint64_t yy = (tiles[i].rand.uint32() & tile_mask) | offs_y;
-            Genome genome(config, tiles[i].rand, init_genome, nullptr);
+            angle_t angle = tile.rand.uint32();
+            uint64_t xx = (tile.rand.uint32() & tile_mask) | offs_x;
+            uint64_t yy = (tile.rand.uint32() & tile_mask) | offs_y;
+            Genome genome(config, tile.rand, init_genome, nullptr);
             Creature *cr = Creature::spawn(config, genome,
                 next_id++, Position{xx, yy}, angle, uint32_t(-1));
-            *tiles[i].last = cr;  tiles[i].last = &cr->next;
+            *tile.last = cr;  tile.last = &cr->next;
         }
-        total_creature_count += n;
+        *tile.last = nullptr;  tile.creature_count = n;
     }
-    process_detectors();  current_time = 0;
+    for(auto &group : groups)
+    {
+        group.next_id = next_id;
+        group.process_detectors(config, layout, groups);
+    }
+    current_time = 0;
 }
 
-bool World::load(InStream &stream)
+void World::build_layout(uint32_t group_count)
 {
-    spawn_per_tile = 4;  // TODO: config?
+    TileLayout scheme(config.mask_x + 1, config.mask_y + 1, group_count);
+    scheme.build_layout();
 
+    groups.resize(group_count);
+    for(uint32_t i = 0; i < group_count; i++)groups[i].alloc(scheme.groups[i]);
+
+    layout.resize(scheme.tiles.size());
+    for(size_t i = 0; i < layout.size(); i++)
+    {
+        layout[i] = scheme.tiles[i];
+        Tile &tile = groups[layout[i].group].tiles[layout[i].index];
+        tile.init(scheme.tiles[i]);
+
+        tile.x = i & config.mask_x;
+        tile.y = i >> config.order_x;
+    }
+
+    food_offs.resize(layout.size() + 1);
+    creature_offs.resize(layout.size() + 1);
+}
+
+
+void World::start()
+{
+    Context::start();  // TODO
+}
+
+void World::next_step()  // TODO: threads
+{
+    for(auto &group : groups)group.execute_step(config);
+    for(auto &group : groups)group.consolidate(layout, groups);
+    for(auto &group : groups)group.process_detectors(config, layout, groups);
+    current_time++;
+}
+
+void World::stop()
+{
+    execute(Context::c_stop);  // TODO
+}
+
+
+void World::count_objects()
+{
+    food_offs[0] = creature_offs[0] = 0;
+    size_t food_count = 0, creature_count = 0;
+    for(size_t i = 0; i < layout.size(); i++)
+    {
+        Tile &tile = groups[layout[i].group].tiles[layout[i].index];
+
+        food_offs[i + 1] = food_count += tile.food_count;
+        creature_offs[i + 1] = creature_count += tile.creature_count;
+    }
+}
+
+const Creature *World::update(FoodData *food_buf, CreatureData *creature_buf, uint64_t sel_id) const  // TODO: threads
+{
+    const Creature *sel = nullptr;
+    for(auto &group : groups)
+    {
+        const Creature *cr = group.update(config, sel_id, food_buf, food_offs, creature_buf, creature_offs);
+        if(cr)sel = cr;
+    }
+    return sel;
+}
+
+
+const Creature *World::hit_test(const Position &pos, uint32_t rad, uint64_t prev_id) const
+{
+    uint32_t x1 = (pos.x - rad) >> tile_order & config.mask_x;
+    uint32_t y1 = (pos.y - rad) >> tile_order & config.mask_y;
+    uint32_t x2 = (pos.x + rad) >> tile_order & config.mask_x;
+    uint32_t y2 = (pos.y + rad) >> tile_order & config.mask_y;
+
+    uint64_t r2 = uint64_t(rad) * rad;
+    bool test[] = {true, x1 != x2, y1 != y2, x1 != x2 && y1 != y2};  const Creature *sel = nullptr;
+    if(test[0] && get_tile(x1 | (y1 << config.order_x)).hit_test(pos, r2, sel, prev_id))return sel;
+    if(test[1] && get_tile(x2 | (y1 << config.order_x)).hit_test(pos, r2, sel, prev_id))return sel;
+    if(test[2] && get_tile(x1 | (y2 << config.order_x)).hit_test(pos, r2, sel, prev_id))return sel;
+    if(test[3] && get_tile(x2 | (y2 << config.order_x)).hit_test(pos, r2, sel, prev_id))return sel;
+    return sel;
+}
+
+
+bool World::load(InStream &stream, uint32_t group_count)
+{
     stream.assert_align(8);  char header[8];  stream.get(header, 8);
     if(!stream || std::memcmp(header, version_string, sizeof(header)))return false;
-    stream >> config >> align(8) >> current_time >> next_id;
+    uint64_t next_id;  stream >> config >> align(8) >> current_time >> next_id;
     if(!stream)return false;
 
-    size_t size = size_t(1) << (config.order_x + config.order_y);
-    tiles.resize(size);  total_food_count = total_creature_count = 0;
+    build_layout(group_count);
     std::vector<uint64_t> buf(std::max<uint32_t>(1, config.slot_bits >> 6));
-    for(size_t i = 0; i < size; i++)
+    for(size_t i = 0; i < layout.size(); i++)
     {
-        uint32_t x = i & config.mask_x, y = i >> config.order_x;
-        if(!tiles[i].load(config, stream, x, y, next_id,
-            total_food_count, total_creature_count, buf.data()))return false;
+        Tile &tile = groups[layout[i].group].tiles[layout[i].index];
+        if(!tile.load(config, stream, next_id, buf.data()))return false;
     }
-    process_detectors();  return true;
+    for(auto &group : groups)
+    {
+        group.next_id = next_id;
+        group.process_detectors(config, layout, groups);
+    }
+    return true;
 }
 
 void World::save(OutStream &stream) const
 {
     stream.assert_align(8);  stream.put(version_string, 8);
-    stream << config << align(8) << current_time << next_id;
+    stream << config << align(8) << current_time << groups[0].next_id;
     std::vector<uint64_t> buf(std::max<uint32_t>(1, config.slot_bits >> 6));
-    for(auto &tile : tiles)tile.save(stream, buf.data());
+    for(size_t i = 0; i < layout.size(); i++)
+    {
+        const Tile &tile = groups[layout[i].group].tiles[layout[i].index];
+        tile.save(stream, buf.data());
+    }
 }

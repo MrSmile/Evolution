@@ -28,7 +28,7 @@ inline uint64_t bswap64(uint64_t val)
 
 inline uint16_t to_le16(uint16_t val)
 {
-#ifdef BIG_ENDIAN
+#ifdef USE_BIG_ENDIAN
     return bswap16(val);
 #else
     return val;
@@ -37,7 +37,7 @@ inline uint16_t to_le16(uint16_t val)
 
 inline uint32_t to_le32(uint32_t val)
 {
-#ifdef BIG_ENDIAN
+#ifdef USE_BIG_ENDIAN
     return bswap32(val);
 #else
     return val;
@@ -46,7 +46,7 @@ inline uint32_t to_le32(uint32_t val)
 
 inline uint64_t to_le64(uint64_t val)
 {
-#ifdef BIG_ENDIAN
+#ifdef USE_BIG_ENDIAN
     return bswap64(val);
 #else
     return val;

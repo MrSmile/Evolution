@@ -504,7 +504,7 @@ GLuint load_texture(Image::Index id)
     return tex;
 }
 
-Representation::Representation(const World &world, SDL_Window *window) : world(world), cam(window), move(t_none)
+Representation::Representation(World &world, SDL_Window *window) : world(world), cam(window), move(t_none)
 {
     prog[prog_food] = create_program("food", VertShader::food, FragShader::color);
     i_transform[prog_food] = glGetUniformLocation(prog[prog_food], "transform");
@@ -717,37 +717,6 @@ bool Representation::mouse_up(const SDL_MouseButtonEvent &evt)
 }
 
 
-bool hit_test(const World::Tile &tile,
-    uint64_t x0, uint64_t y0, uint64_t max_r2, const Creature *&sel, uint64_t prev_id)
-{
-    for(const Creature *cr = tile.first; cr; cr = cr->next)
-    {
-        int32_t dx = cr->pos.x - x0;
-        int32_t dy = cr->pos.y - y0;
-        uint64_t r2 = int64_t(dx) * dx + int64_t(dy) * dy;
-        if(r2 >= max_r2)continue;
-
-        if(cr->id == prev_id && sel)return true;  sel = cr;
-    }
-    return false;
-}
-
-const Creature *hit_test(const World &world, uint64_t x0, uint64_t y0, uint32_t rad, uint64_t prev_id)
-{
-    uint32_t x1 = (x0 - rad) >> tile_order & world.config.mask_x;
-    uint32_t y1 = (y0 - rad) >> tile_order & world.config.mask_y;
-    uint32_t x2 = (x0 + rad) >> tile_order & world.config.mask_x;
-    uint32_t y2 = (y0 + rad) >> tile_order & world.config.mask_y;
-
-    uint64_t r2 = uint64_t(rad) * rad;
-    bool test[] = {true, x1 != x2, y1 != y2, x1 != x2 && y1 != y2};  const Creature *sel = nullptr;
-    if(test[0] && hit_test(world.tiles[x1 | (y1 << world.config.order_x)], x0, y0, r2, sel, prev_id))return sel;
-    if(test[1] && hit_test(world.tiles[x2 | (y1 << world.config.order_x)], x0, y0, r2, sel, prev_id))return sel;
-    if(test[2] && hit_test(world.tiles[x1 | (y2 << world.config.order_x)], x0, y0, r2, sel, prev_id))return sel;
-    if(test[3] && hit_test(world.tiles[x2 | (y2 << world.config.order_x)], x0, y0, r2, sel, prev_id))return sel;
-    return sel;
-}
-
 bool Representation::select(int32_t x, int32_t y)
 {
     constexpr int click_zone = 8;
@@ -755,7 +724,7 @@ bool Representation::select(int32_t x, int32_t y)
     uint64_t x0 = cam.x + std::lround(x * cam.scale);
     uint64_t y0 = cam.y + std::lround(y * cam.scale);
     uint32_t rad = std::min<long>(tile_size, world.config.base_radius + std::lround(click_zone * cam.scale));
-    sel.cr = ::hit_test(world, x0, y0, rad, sel.id);
+    sel.cr = world.hit_test({x0, y0}, rad, sel.id);
     if(!sel.cr)
     {
         if(sel.id == uint64_t(-1))return false;
@@ -771,10 +740,12 @@ bool Representation::select(int32_t x, int32_t y)
 
 void Representation::update_title(SDL_Window *window, bool checksum)
 {
+    world.count_objects();
+
     char buf[256];
     snprintf(buf, sizeof(buf),
         "Evolution - Time: %llu, Food: %lu, Creature: %lu", (unsigned long long)world.current_time,
-        (unsigned long)world.total_food_count, (unsigned long)world.total_creature_count);
+        (unsigned long)world.food_total(), (unsigned long)world.creature_total());
     SDL_SetWindowTitle(window, buf);
 
     if(checksum || !(world.current_time % 1000))
@@ -785,37 +756,19 @@ void Representation::update_title(SDL_Window *window, bool checksum)
     }
 }
 
-void Representation::update()
+void Representation::update()  // update_title() should be executed prior
 {
-    count[inst_food] = world.total_food_count;
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_ptr = nullptr;
+    count[inst_food] = world.food_total();
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_buf = nullptr;
     glBufferData(GL_ARRAY_BUFFER, count[inst_food] * sizeof(FoodData), nullptr, GL_STREAM_DRAW);
-    if(count[inst_food])food_ptr = static_cast<FoodData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+    if(count[inst_food])food_buf = static_cast<FoodData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
 
-    count[inst_creature] = world.total_creature_count;
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);  CreatureData *creature_ptr = nullptr;
+    count[inst_creature] = world.creature_total();
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);  CreatureData *creature_buf = nullptr;
     glBufferData(GL_ARRAY_BUFFER, count[inst_creature] * sizeof(CreatureData), nullptr, GL_STREAM_DRAW);
-    if(count[inst_creature])creature_ptr = static_cast<CreatureData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+    if(count[inst_creature])creature_buf = static_cast<CreatureData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
 
-#ifndef NDEBUG
-    FoodData *food_end = food_ptr + count[inst_food];
-    CreatureData *creature_end = creature_ptr + count[inst_creature];
-#endif
-    sel.cr = nullptr;
-    for(const auto &tile : world.tiles)
-    {
-        for(const auto &food : tile.foods)if(food.type > Food::sprout)
-            (food_ptr++)->set(world.config, food);
-
-        for(const Creature *cr = tile.first; cr; cr = cr->next)
-        {
-            if(cr->id == sel.id)sel.cr = cr;
-            (creature_ptr++)->set(world.config, *cr);
-        }
-    }
-    assert(food_ptr == food_end);
-    assert(creature_ptr == creature_end);
-
+    sel.cr = world.update(food_buf, creature_buf, sel.id);
     sel.fill_sel_header(buf[inst_header], count[inst_header]);
     sel.fill_sel_levels(buf[inst_level], count[inst_level]);
     sel.fill_sel_limbs(buf[inst_sector], buf[inst_leg], count[inst_sector], count[inst_leg]);
@@ -827,12 +780,12 @@ void Representation::update()
         sel.pos = sel.cr->pos;
     }
 
-    if(food_ptr)
+    if(food_buf)
     {
         glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);
         glUnmapBuffer(GL_ARRAY_BUFFER);
     }
-    if(creature_ptr)
+    if(creature_buf)
     {
         glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
         glUnmapBuffer(GL_ARRAY_BUFFER);

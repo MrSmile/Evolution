@@ -36,7 +36,7 @@ bool load_restart(World &world, const char *path)
     {
         std::printf("Cannot open restart file \"%s\"!\n", path);  return false;
     }
-    stream >> world;
+    world.load(stream, 1);
     if(!stream.close())
     {
         std::printf("Invalid restart file \"%s\"!\n", path);  return false;
@@ -65,7 +65,7 @@ bool main_loop(SDL_Window *window, char **args, int n)
     glEnable(GL_CULL_FACE);
 
     World world;
-    if(n <= 1)world.init();
+    if(n <= 1)world.init(1);
     else if(!load_restart(world, args[1]))return false;
     Representation graph(world, window);
     graph.update_title(window, true);
