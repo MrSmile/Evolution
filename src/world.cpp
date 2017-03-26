@@ -1221,15 +1221,9 @@ void World::process_tile_pair(Tile &tile1, Tile &tile2)
 
 void World::process_detectors()
 {
-    size_t spawn = 0;
     for(auto &tile : tiles)
-    {
-        *tile.last = nullptr;
-        spawn = std::max(spawn, tile.foods.size() - tile.spawn_start);
         for(Creature *cr = tile.first; cr; cr = cr->next)
             cr->pre_process(config);
-    }
-    spawn_per_tile = std::max(spawn_per_tile / 2, 2 * spawn + 1);
 
     for(size_t i = 0; i < tiles.size(); i++)
     {
@@ -1263,7 +1257,8 @@ void World::next_step()
     {
         spawn_grass(tiles[i], i & config.mask_x, i >> config.order_x);
 
-        for(Creature *ptr = old[i].first; ptr;)
+        Creature *ptr = old[i].first;  old[i].last = &old[i].first;
+        while(ptr)
         {
             Creature *cr = ptr;  ptr = ptr->next;
 
@@ -1286,13 +1281,27 @@ void World::next_step()
                 if(child)
                 {
                     leftover -= child->passive_energy + child->energy;
-                    *tiles[i].last = child;  tiles[i].last = &child->next;  total_creature_count++;
+                    *old[i].last = child;  old[i].last = &child->next;  total_creature_count++;
                 }
                 spawn_meat(tiles[i], prev_pos, leftover);
             }
         }
+        *old[i].last = nullptr;
     }
     *del_last = nullptr;
+
+    size_t spawn = 0;
+    for(size_t i = 0; i < old.size(); i++)
+    {
+        spawn = std::max(spawn, tiles[i].foods.size() - tiles[i].spawn_start);
+        if(old[i].first)
+        {
+            *tiles[i].last = old[i].first;  tiles[i].last = old[i].last;
+        }
+        *tiles[i].last = nullptr;
+    }
+    spawn_per_tile = std::max(spawn_per_tile / 2, 2 * spawn + 1);
+
     while(del_queue)
     {
         Creature *cr = del_queue;  del_queue = cr->next;  delete cr;
@@ -1396,7 +1405,7 @@ void World::init()
                 next_id++, Position{xx, yy}, angle, uint32_t(-1));
             *tiles[i].last = cr;  tiles[i].last = &cr->next;
         }
-        total_creature_count += n;
+        *tiles[i].last = nullptr;  total_creature_count += n;
     }
     process_detectors();  current_time = 0;
 }
