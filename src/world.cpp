@@ -1239,6 +1239,7 @@ void TileGroup::execute_step(const Config &config)
         buf.food_count = buf.creature_count = 0;
     }
 
+    Creature **del_last = &del_queue;
     for(auto &tile : tiles)
     {
         auto &foods = tile.foods;  size_t n = 0;
@@ -1247,9 +1248,8 @@ void TileGroup::execute_step(const Config &config)
         foods.resize(tile.spawn_start = tile.food_count = n);
         spawn_grass(config, tile);
 
-        uint64_t id = next_id;
-        Creature *ptr = tile.first;
-        tile.first = nullptr;  tile.last = &tile.first;
+        uint64_t id = next_id;  Creature *ptr = tile.first;
+        tile.last = &tile.first;  tile.creature_count = 0;
         while(ptr)
         {
             Creature *cr = ptr;  ptr = ptr->next;
@@ -1259,7 +1259,7 @@ void TileGroup::execute_step(const Config &config)
             uint32_t dead_energy = cr->execute_step(config);
             if(dead_energy)
             {
-                *tile.last = cr;  tile.last = &cr->next;  // potential father
+                *del_last = cr;  del_last = &cr->next;  // potential father
                 spawn_meat(config, tile, prev_pos, dead_energy);  continue;
             }
 
@@ -1272,24 +1272,30 @@ void TileGroup::execute_step(const Config &config)
                 if(child)
                 {
                     leftover -= child->passive_energy + child->energy;
-                    buffers[tile.neighbors[4]].append(child);  // TODO: reorder children to end
+                    tile.append(child);
                 }
                 spawn_meat(config, tile, prev_pos, leftover);
             }
         }
         tile.children_count = id - next_id;  *tile.last = nullptr;
     }
+    *del_last = nullptr;
 }
 
 void TileGroup::consolidate(const std::vector<Reference> &layout, std::vector<TileGroup> &groups)
 {
-    uint64_t split = next_id, n = 0;
+    uint64_t n = 0;
     for(const auto &ref : layout)
     {
         if(groups.data() + ref.group == this)tiles[ref.index].id_offset = n;
         n += groups[ref.group].tiles[ref.index].children_count;
     }
     next_id += n;
+
+    for(Creature *ptr = del_queue; ptr;)
+    {
+        Creature *cr = ptr;  ptr = ptr->next;  delete cr;
+    }
 
     for(auto &tile : tiles)
     {
@@ -1301,16 +1307,10 @@ void TileGroup::consolidate(const std::vector<Reference> &layout, std::vector<Ti
         }
         tile.foods.reserve(n);
 
-        for(Creature *ptr = tile.first; ptr;)
-        {
-            Creature *cr = ptr;  ptr = ptr->next;  delete cr;
-        }
+        Creature *first_child = tile.first, **last_child = tile.last;
+        for(Creature *cr = first_child; cr; cr = cr->next)cr->id += tile.id_offset;
 
-        auto &buf = buffers[tile.neighbors[4]];  *buf.last = nullptr;
-        for(Creature *cr = buf.first; cr; cr = cr->next)
-            if(cr->id >= split)cr->id += tile.id_offset;  // TODO: reorder children to end
-
-        tile.last = &tile.first;  tile.creature_count = 0;
+        tile.last = &tile.first;
         for(int i = 0; i < tile.ref_count; i++)
         {
             const auto &ref = tile.refs[i];
@@ -1322,6 +1322,10 @@ void TileGroup::consolidate(const std::vector<Reference> &layout, std::vector<Ti
             if(!buf.creature_count)continue;
             *tile.last = buf.first;  tile.last = buf.last;
             tile.creature_count += buf.creature_count;
+        }
+        if(first_child)
+        {
+            *tile.last = first_child;  tile.last = last_child;
         }
         *tile.last = nullptr;
     }

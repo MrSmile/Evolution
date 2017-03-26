@@ -520,6 +520,7 @@ struct TileGroup
     uint64_t next_id;
     std::vector<Tile> tiles;
     std::vector<TileBuffer> buffers;
+    Creature *del_queue;
 
 
     void alloc(const TileLayout::GroupDesc &desc);
