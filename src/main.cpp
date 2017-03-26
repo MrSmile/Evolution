@@ -36,7 +36,7 @@ bool load_restart(World &world, const char *path)
     {
         std::printf("Cannot open restart file \"%s\"!\n", path);  return false;
     }
-    world.load(stream, 1);
+    stream >> world;
     if(!stream.close())
     {
         std::printf("Invalid restart file \"%s\"!\n", path);  return false;
@@ -64,12 +64,13 @@ bool main_loop(SDL_Window *window, char **args, int n)
     glEnable(GL_FRAMEBUFFER_SRGB);  glEnable(GL_MULTISAMPLE);
     glEnable(GL_CULL_FACE);
 
-    World world;
-    if(n <= 1)world.init(1);
+    World world(8);
+    if(n <= 1)world.init();
     else if(!load_restart(world, args[1]))return false;
     Representation graph(world, window);
-    graph.update_title(window, true);
-    graph.update();
+
+    world.start();
+    graph.update(window, true, true);
 
     if(!check_gl_error())return false;
 
@@ -81,11 +82,11 @@ bool main_loop(SDL_Window *window, char **args, int n)
         {
             if(play)
             {
-                world.next_step();  graph.update_title(window, false);
+                world.next_step();  graph.update(window, false, active);
             }
             if(active)
             {
-                if(play)graph.update();  graph.draw();
+                graph.draw();
                 if(!check_gl_error())return false;
                 SDL_GL_SwapWindow(window);
             }
@@ -119,7 +120,8 @@ bool main_loop(SDL_Window *window, char **args, int n)
                 active = false;  continue;
 
             case SDL_WINDOWEVENT_RESTORED:
-                graph.update();  active = true;  break;
+                graph.update(window, false, true);
+                active = true;  break;
 
             default:
                 continue;
@@ -133,8 +135,9 @@ bool main_loop(SDL_Window *window, char **args, int n)
                 update = play = !play;  continue;
 
             case SDLK_RIGHT:
-                world.next_step();  graph.update_title(window, true);
-                graph.update();  play = false;  break;
+                world.next_step();
+                graph.update(window, true, true);
+                play = false;  break;
 
             case SDLK_F5:
                 save_restart(world);  break;

@@ -738,15 +738,15 @@ bool Representation::select(int32_t x, int32_t y)
     fill_sel_bufs();  return true;
 }
 
-void Representation::update_title(SDL_Window *window, bool checksum)
+void Representation::update(SDL_Window *window, bool checksum, bool draw)
 {
     world.count_objects();
 
-    char buf[256];
-    snprintf(buf, sizeof(buf),
+    char title[256];
+    snprintf(title, sizeof(title),
         "Evolution - Time: %llu, Food: %lu, Creature: %lu", (unsigned long long)world.current_time,
         (unsigned long)world.food_total(), (unsigned long)world.creature_total());
-    SDL_SetWindowTitle(window, buf);
+    SDL_SetWindowTitle(window, title);
 
     if(checksum || !(world.current_time % 1000))
     {
@@ -754,10 +754,9 @@ void Representation::update_title(SDL_Window *window, bool checksum)
         stream << world;  stream.finalize();
         print_checksum(world, stream);
     }
-}
 
-void Representation::update()  // update_title() should be executed prior
-{
+    if(!draw)return;
+
     count[inst_food] = world.food_total();
     glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_buf = nullptr;
     glBufferData(GL_ARRAY_BUFFER, count[inst_food] * sizeof(FoodData), nullptr, GL_STREAM_DRAW);

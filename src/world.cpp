@@ -802,10 +802,10 @@ void Creature::calc_mapping(const GenomeProcessor &proc, std::vector<uint32_t> &
 
 Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &proc,
     uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy) : id(id),
-    genome(std::move(genome)), pos(pos), angle(angle), passive_energy(proc.passive_cost.initial),  food_energy(0),
+    genome(std::move(genome)), pos(pos), angle(angle), passive_energy(proc.passive_cost.initial), food_energy(0),
     energy(std::min(spawn_energy - proc.passive_cost.initial, proc.max_energy)), max_energy(proc.max_energy),
-    passive_cost(proc.passive_cost.per_tick), total_life(proc.max_life), max_life(proc.max_life),
-    damage(0), creature_vis_r2{}, food_vis_r2{}, father(config.base_r2), flags(f_creature)
+    passive_cost(proc.passive_cost.per_tick), total_life(proc.max_life), max_life(proc.max_life), damage(0),
+    creature_vis_r2{}, food_vis_r2{}, claw_r2(0), father(config.base_r2), flags(f_creature)
 {
     uint32_t offset[Slot::invalid], n = 0;
     wombs.reserve(update_counters(proc.count, offset, n, Slot::womb));
@@ -1104,10 +1104,9 @@ void Creature::save(OutStream &stream, uint64_t *buf) const
 TileLayout::TileLayout(uint32_t size_x, uint32_t size_y, uint32_t group_count) :
     size_x(size_x), size_y(size_y), tiles(size_x * size_y), groups(group_count)
 {
-    Random rand(clock(), 0);
     for(size_t i = 0; i < tiles.size(); i++)
     {
-        uint32_t group = rand.uniform(group_count);  // DEBUG
+        uint32_t group = uint64_t(i) * group_count / tiles.size();
 
         tiles[i].group = group;
         tiles[i].index = groups[group].tile_count++;
@@ -1370,7 +1369,7 @@ void TileGroup::process_detectors(const Config &config,
         for(Creature *cr = tile.first; cr; cr = cr->next)cr->post_process();
 
         for(auto &food : tile.foods)if(food.eater.target)
-            food.eater.target->food_energy += config.food_energy;  // TODO: atomic
+            food.eater.target->food_energy += config.food_energy;
     }
 }
 
@@ -1496,36 +1495,54 @@ void TileGroup::Tile::save(OutStream &stream, uint64_t *buf) const
 
 void Context::start()
 {
-    stage = 0;  cmd = c_none;
+    stage = 0;  cmd = c_stop;
+}
+
+void Context::pre_execute()
+{
+    std::unique_lock<std::mutex> lock(mutex);
+    while(cmd)cond_cmd.wait(lock);  lock.release();
+}
+
+void Context::post_execute(Command new_cmd)
+{
+    std::unique_lock<std::mutex> lock(mutex, std::adopt_lock);
+    if((cmd = new_cmd))cond_work.notify_all();
 }
 
 void Context::execute(Command new_cmd)
 {
     std::unique_lock<std::mutex> lock(mutex);
     while(cmd)cond_cmd.wait(lock);  cmd = new_cmd;
-    cond_work.notify_all();
+    if(new_cmd)cond_work.notify_all();
 }
+
 
 Context::Command Context::first_wait(uint32_t &target)
 {
+    uint32_t n = groups.size();
     std::unique_lock<std::mutex> lock(mutex);
-    if(++stage == target)cond_cmd.notify_one();
-    else while(stage != target)cond_work.wait(lock);
+    if(++stage == target)
+    {
+        cmd = c_none;  cond_cmd.notify_one();
+    }
+    else while(stage - target >= n)cond_work.wait(lock);
     while(!cmd)cond_work.wait(lock);
-    target += groups.size();
-    return cmd;
+    target += n;  return cmd;
 }
 
 void Context::barrier(uint32_t &target)
 {
+    uint32_t n = groups.size();
     std::unique_lock<std::mutex> lock(mutex);
     if(++stage == target)cond_work.notify_all();
-    else while(stage != target)cond_work.wait(lock);
-    target += groups.size();
+    else while(stage - target >= n)cond_work.wait(lock);
+    target += n;
 }
 
 Context::Command Context::end_step(uint32_t &target)
 {
+    uint32_t n = groups.size();
     std::unique_lock<std::mutex> lock(mutex);
     assert(cmd == c_step);
     if(++stage == target)
@@ -1533,24 +1550,23 @@ Context::Command Context::end_step(uint32_t &target)
         current_time++;  cmd = c_none;
         cond_cmd.notify_one();
     }
-    else while(stage != target)cond_work.wait(lock);
+    else while(stage - target >= n)cond_work.wait(lock);
     while(!cmd)cond_work.wait(lock);
-    target += groups.size();
-    return cmd;
+    target += n;  return cmd;
 }
 
 Context::Command Context::end_draw(uint32_t &target, const Creature *cr)
 {
+    uint32_t n = groups.size();
     std::unique_lock<std::mutex> lock(mutex);
     assert(cmd == c_draw);  if(cr)sel = cr;
     if(++stage == target)
     {
         cmd = c_none;  cond_cmd.notify_one();
     }
-    else while(stage != target)cond_work.wait(lock);
+    else while(stage - target >= n)cond_work.wait(lock);
     while(!cmd)cond_work.wait(lock);
-    target += groups.size();
-    return cmd;
+    target += n;  return cmd;
 }
 
 
@@ -1559,7 +1575,18 @@ Context::Command Context::end_draw(uint32_t &target, const Creature *cr)
 
 const char version_string[] = "Evol0003";
 
-void World::init(uint32_t group_count)
+
+World::World(uint32_t group_count) : group_count(group_count)
+{
+}
+
+World::~World()
+{
+    if(!threads.empty())stop();
+}
+
+
+void World::init()
 {
     config.order_x = config.order_y = 5;  // 32 x 32
     config.base_radius = tile_size / 64;
@@ -1618,7 +1645,7 @@ void World::init(uint32_t group_count)
     uint32_t exp_creature_gen = uint32_t(-1) >> 16;
 
 
-    build_layout(group_count);
+    build_layout();
     Genome init_genome(config);  uint64_t next_id = 0;
     for(size_t i = 0; i < layout.size(); i++)
     {
@@ -1658,7 +1685,7 @@ void World::init(uint32_t group_count)
     current_time = 0;
 }
 
-void World::build_layout(uint32_t group_count)
+void World::build_layout()
 {
     TileLayout scheme(config.mask_x + 1, config.mask_y + 1, group_count);
     scheme.build_layout();
@@ -1684,20 +1711,25 @@ void World::build_layout(uint32_t group_count)
 
 void World::start()
 {
-    Context::start();  // TODO
+    assert(threads.empty());
+
+    Context::start();
+    threads.reserve(group_count);
+    for(uint32_t i = 0; i < group_count; i++)
+        threads.emplace_back(TileGroup::thread_proc, this, i);
+    pre_execute();
 }
 
-void World::next_step()  // TODO: threads
+void World::next_step()
 {
-    for(auto &group : groups)group.execute_step(config);
-    for(auto &group : groups)group.consolidate(layout, groups);
-    for(auto &group : groups)group.process_detectors(config, layout, groups);
-    current_time++;
+    post_execute(c_step);  pre_execute();
 }
 
 void World::stop()
 {
-    execute(Context::c_stop);  // TODO
+    post_execute(c_stop);
+    for(auto &thread : threads)thread.join();
+    threads.clear();
 }
 
 
@@ -1714,15 +1746,16 @@ void World::count_objects()
     }
 }
 
-const Creature *World::update(FoodData *food_buf, CreatureData *creature_buf, uint64_t sel_id) const  // TODO: threads
+const Creature *World::update(FoodData *food_buf, CreatureData *creature_buf, uint64_t sel_id)
 {
-    const Creature *sel = nullptr;
-    for(auto &group : groups)
-    {
-        const Creature *cr = group.update(config, sel_id, food_buf, food_offs, creature_buf, creature_offs);
-        if(cr)sel = cr;
-    }
-    return sel;
+    // count_objects() should be called prior
+
+    sel = nullptr;
+    Context::sel_id = sel_id;
+    Context::food_buf = food_buf;
+    Context::creature_buf = creature_buf;
+
+    post_execute(c_draw);  pre_execute();  return sel;
 }
 
 
@@ -1743,14 +1776,14 @@ const Creature *World::hit_test(const Position &pos, uint32_t rad, uint64_t prev
 }
 
 
-bool World::load(InStream &stream, uint32_t group_count)
+bool World::load(InStream &stream)
 {
     stream.assert_align(8);  char header[8];  stream.get(header, 8);
     if(!stream || std::memcmp(header, version_string, sizeof(header)))return false;
     uint64_t next_id;  stream >> config >> align(8) >> current_time >> next_id;
     if(!stream)return false;
 
-    build_layout(group_count);
+    build_layout();
     std::vector<uint64_t> buf(std::max<uint32_t>(1, config.slot_bits >> 6));
     for(size_t i = 0; i < layout.size(); i++)
     {

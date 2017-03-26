@@ -6,6 +6,7 @@
 #include "math.h"
 #include <vector>
 #include <thread>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 
@@ -362,7 +363,7 @@ struct Creature
     Position pos;
     angle_t angle;
     uint32_t passive_energy;
-    mutable uint32_t food_energy;
+    mutable std::atomic<uint32_t> food_energy;
     uint32_t energy, max_energy, passive_cost;
     uint32_t total_life, max_life, damage;
     uint64_t creature_vis_r2[f_creature];
@@ -564,7 +565,10 @@ struct Context
     uint32_t stage;  Command cmd;
 
     void start();
+    void pre_execute();
+    void post_execute(Command new_cmd);
     void execute(Command new_cmd);
+
     Command first_wait(uint32_t &target);
     void barrier(uint32_t &target);
     Command end_step(uint32_t &target);
@@ -577,18 +581,26 @@ struct World : public Context
     typedef TileLayout::Reference Reference;
     typedef TileGroup::Tile Tile;
 
-    void init(uint32_t group_count);
-    void build_layout(uint32_t group_count);
+
+    uint32_t group_count;
+    std::vector<std::thread> threads;
+
+
+    World(uint32_t group_count);
+    ~World();
+
+    void init();
+    void build_layout();
 
     void start();
     void next_step();
     void stop();
 
     void count_objects();
-    const Creature *update(FoodData *food_buf, CreatureData *creature_buf, uint64_t sel_id) const;
+    const Creature *update(FoodData *food_buf, CreatureData *creature_buf, uint64_t sel_id);
     const Creature *hit_test(const Position &pos, uint32_t rad, uint64_t prev_id) const;
 
-    bool load(InStream &stream, uint32_t group_count);
+    bool load(InStream &stream);
     void save(OutStream &stream) const;
 
     size_t food_total() const
