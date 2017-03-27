@@ -149,13 +149,13 @@ struct CreatureData
 
     void set(const Config &config, const Creature &cr)
     {
-        GLfloat energy_mul = config.base_r2 * draw_scale * draw_scale / (1 << 16);
+        GLfloat energy_mul = config.base_r2 * draw_scale * draw_scale / (config.capacity_mul << config.base_bits);
         GLfloat life_mul = energy_mul * config.hide_mul / config.life_mul;
 
         x = cr.pos.x * draw_scale;
         y = cr.pos.y * draw_scale;
 
-        GLfloat sqr = cr.passive_energy * energy_mul - cr.max_life * life_mul;
+        GLfloat sqr = cr.passive_cost.initial * energy_mul - cr.max_life * life_mul;
         rad[0] = std::sqrt(sqr);  sqr += cr.max_energy * energy_mul;
         rad[1] = std::sqrt(sqr);  sqr += cr.max_life * life_mul;
         rad[2] = std::sqrt(sqr);

@@ -229,7 +229,7 @@ void Representation::Selection::fill_sel_genes(const Config &config,
     size_gui = data_gui.size();
 }
 
-void Representation::Selection::fill_sel_header(GLuint buf_gui, size_t &size_gui)
+void Representation::Selection::fill_sel_header(const Config &config, GLuint buf_gui, size_t &size_gui)
 {
     std::vector<GuiQuad> data_gui;
     data_gui.reserve(54);
@@ -241,11 +241,17 @@ void Representation::Selection::fill_sel_header(GLuint buf_gui, size_t &size_gui
 
     if(id != uint64_t(-1))
     {
-        put_number_pair(data_gui, x1, y1, cr ? cr->energy : -1, proc.max_energy);
-        put_number_pair(data_gui, x1, y2, cr ? cr->total_life : -1, proc.max_life);
+        uint64_t passive = 256 * proc.passive_cost.initial / config.capacity_mul;
+        uint64_t energy = cr ? 256 * cr->energy / config.capacity_mul : -1;
+        uint64_t max_energy = 256 * proc.max_energy / config.capacity_mul;
+        uint32_t life = cr ? 256 * cr->total_life / config.life_mul : -1;
+        uint32_t max_life = 256 * proc.max_life / config.life_mul;
+
+        put_number_pair(data_gui, x1, y1, energy, max_energy);
+        put_number_pair(data_gui, x1, y2, life, max_life);
 
         put_icon(data_gui, x2, y1, Slot::womb);
-        write_number_right(data_gui, x2 + Gui::icon_width, y1, proc.passive_cost.initial);
+        write_number_right(data_gui, x2 + Gui::icon_width, y1, passive);
     }
 
     if(!skip_unused)

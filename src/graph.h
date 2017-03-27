@@ -102,7 +102,7 @@ class Representation
 
         void fill_sel_genes(const Config &config,
             GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
-        void fill_sel_header(GLuint buf_gui, size_t &size_gui);
+        void fill_sel_header(const Config &config, GLuint buf_gui, size_t &size_gui);
         void fill_sel_slots(GLuint buf_back, GLuint buf_gui, size_t &size_back, size_t &size_gui);
         void fill_sel_levels(GLuint buf, size_t &size);
         void fill_sel_links(GLuint buf, size_t &size);

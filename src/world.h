@@ -41,7 +41,7 @@ struct Config
 {
     struct SlotCost
     {
-        uint32_t initial, per_tick;
+        uint64_t initial, per_tick;
     };
 
     uint8_t order_x, order_y;
@@ -55,14 +55,14 @@ struct Config
     uint32_t bit_mutate_factor;
 
     SlotCost base_cost, gene_cost, cost[Slot::invalid];
-    uint32_t eating_cost, signal_cost;
+    uint64_t eating_cost, signal_cost;
 
-    uint32_t spawn_mul, capacity_mul, hide_mul;
+    uint64_t spawn_mul, capacity_mul, hide_mul;
     uint32_t damage_mul, life_mul, life_regen;
     uint32_t speed_mul, rotate_mul;
     uint8_t mass_order;
 
-    uint32_t food_energy;
+    uint64_t food_energy;
     uint32_t exp_sprout_per_tile;
     uint32_t exp_sprout_per_grass;
     uint32_t repression_range;
@@ -73,6 +73,7 @@ struct Config
     uint32_t mask_x, mask_y;
     uint64_t full_mask_x, full_mask_y;
     uint64_t base_r2, repression_r2;
+    uint8_t shift_base, shift_cap, shift_life;
 
     bool calc_derived();
     bool load(InStream &stream);
@@ -239,7 +240,7 @@ public:
     std::vector<SlotData> slots;
     std::vector<LinkData> links;
     Config::SlotCost passive_cost;
-    uint32_t max_energy, max_life;
+    uint64_t max_energy;  uint32_t max_life;
     uint32_t count[Slot::invalid];
 
 
@@ -273,7 +274,7 @@ struct Creature
 
     struct Womb
     {
-        uint32_t energy;
+        uint64_t energy;
         bool active;
 
         Womb(const Config &config, const GenomeProcessor::SlotData &slot);
@@ -282,8 +283,8 @@ struct Creature
     struct Claw
     {
         uint64_t rad_sqr;
-        angle_t angle, delta;
         uint32_t damage, act_cost;
+        angle_t angle, delta;
         bool active;
 
         Claw(const Config &config, const GenomeProcessor::SlotData &slot);
@@ -299,8 +300,8 @@ struct Creature
 
     struct Signal
     {
+        uint64_t act_cost;
         uint8_t flags;
-        uint32_t act_cost;
 
         Signal(const Config &config, const GenomeProcessor::SlotData &slot);
     };
@@ -308,7 +309,8 @@ struct Creature
 
     struct Stomach
     {
-        uint32_t capacity, mul;
+        uint64_t capacity;
+        uint32_t mul;
 
         Stomach(const Config &config, const GenomeProcessor::SlotData &slot);
     };
@@ -362,9 +364,9 @@ struct Creature
 
     Position pos;
     angle_t angle;
-    uint32_t passive_energy;
-    mutable std::atomic<uint32_t> food_energy;
-    uint32_t energy, max_energy, passive_cost;
+    uint64_t energy, max_energy;
+    Config::SlotCost passive_cost;
+    mutable std::atomic<uint64_t> food_energy;
     uint32_t total_life, max_life, damage;
     uint64_t creature_vis_r2[f_creature];
     uint64_t food_vis_r2[2], claw_r2;
@@ -398,11 +400,11 @@ struct Creature
     Slot::Type append_slot(const Config &config, const GenomeProcessor::SlotData &slot);
     static void calc_mapping(const GenomeProcessor &proc, std::vector<uint32_t> &mapping);
     Creature(const Config &config, Genome &genome, const GenomeProcessor &proc,
-        uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
+        uint64_t id, const Position &pos, angle_t angle, uint64_t spawn_energy);
     static Creature *spawn(const Config &config, Genome &genome,
-        uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
+        uint64_t id, const Position &pos, angle_t angle, uint64_t spawn_energy);
     static Creature *spawn(const Config &config, Random &rand, const Creature &parent,
-        uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
+        uint64_t id, const Position &pos, angle_t angle, uint64_t spawn_energy);
 
     void pre_process(const Config &config);
     void update_view(uint8_t tg_flags, uint64_t r2, angle_t dir);
@@ -410,12 +412,12 @@ struct Creature
     void process_food(const std::vector<Food> &foods);
     void eat_food(std::vector<Food> &foods) const;
     void process_detectors(const Creature *cr);
-    void post_process();
+    void post_process(const Config &config);
 
-    uint32_t execute_step(const Config &config);
+    uint64_t execute_step(const Config &config);
 
     static Creature *load(const Config &config, InStream &stream, uint64_t next_id, uint64_t *buf);
-    bool load(InStream &stream, uint32_t load_energy, uint64_t *buf);
+    bool load(InStream &stream, uint64_t load_energy, uint64_t *buf);
     void save(OutStream &stream, uint64_t *buf) const;
 };
 
@@ -527,7 +529,7 @@ struct TileGroup
 
     uint32_t neighbor_index(const Config &config, const Tile &tile, Position &pos);
     void spawn_grass(const Config &config, Tile &tile);
-    void spawn_meat(const Config &config, Tile &tile, Position pos, uint32_t energy);
+    void spawn_meat(const Config &config, Tile &tile, Position pos, uint64_t energy);
 
     void execute_step(const Config &config);
     void consolidate(const std::vector<Reference> &layout, std::vector<TileGroup> &groups);
