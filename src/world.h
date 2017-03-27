@@ -37,7 +37,7 @@ struct Config
 {
     struct SlotCost
     {
-        uint32_t initial, per_tick;
+        uint64_t initial, per_tick;
     };
 
     uint8_t order_x, order_y;
@@ -51,14 +51,14 @@ struct Config
     uint32_t bit_mutate_factor;
 
     SlotCost base_cost, gene_cost, cost[Slot::invalid];
-    uint32_t eating_cost, signal_cost;
+    uint64_t eating_cost, signal_cost;
 
-    uint32_t spawn_mul, capacity_mul, hide_mul;
+    uint64_t spawn_mul, capacity_mul, hide_mul;
     uint32_t damage_mul, life_mul, life_regen;
     uint32_t speed_mul, rotate_mul;
     uint8_t mass_order;
 
-    uint32_t food_energy;
+    uint64_t food_energy;
     uint32_t exp_sprout_per_tile;
     uint32_t exp_sprout_per_grass;
     uint32_t repression_range;
@@ -69,6 +69,7 @@ struct Config
     uint32_t mask_x, mask_y;
     uint64_t full_mask_x, full_mask_y;
     uint64_t base_r2, repression_r2;
+    uint8_t shift_base, shift_cap, shift_life;
 
     bool calc_derived();
     bool load(InStream &stream);
@@ -234,7 +235,7 @@ public:
     std::vector<SlotData> slots;
     std::vector<LinkData> links;
     Config::SlotCost passive_cost;
-    uint32_t max_energy, max_life;
+    uint64_t max_energy;  uint32_t max_life;
     uint32_t count[Slot::invalid];
 
 
@@ -268,7 +269,7 @@ struct Creature
 
     struct Womb
     {
-        uint32_t energy;
+        uint64_t energy;
         bool active;
 
         Womb(const Config &config, const GenomeProcessor::SlotData &slot);
@@ -277,8 +278,8 @@ struct Creature
     struct Claw
     {
         uint64_t rad_sqr;
-        angle_t angle, delta;
         uint32_t damage, act_cost;
+        angle_t angle, delta;
         bool active;
 
         Claw(const Config &config, const GenomeProcessor::SlotData &slot);
@@ -294,8 +295,8 @@ struct Creature
 
     struct Signal
     {
+        uint64_t act_cost;
         uint8_t flags;
-        uint32_t act_cost;
 
         Signal(const Config &config, const GenomeProcessor::SlotData &slot);
     };
@@ -303,7 +304,8 @@ struct Creature
 
     struct Stomach
     {
-        uint32_t capacity, mul;
+        uint64_t capacity;
+        uint32_t mul;
 
         Stomach(const Config &config, const GenomeProcessor::SlotData &slot);
     };
@@ -357,8 +359,8 @@ struct Creature
 
     Position pos;
     angle_t angle;
-    uint32_t passive_energy;
-    uint32_t energy, max_energy, passive_cost;
+    uint64_t energy, max_energy;
+    Config::SlotCost passive_cost;
     uint32_t total_life, max_life, damage;
     Detector father;
     uint8_t flags;
@@ -389,23 +391,23 @@ struct Creature
     Slot::Type append_slot(const Config &config, const GenomeProcessor::SlotData &slot);
     static void calc_mapping(const GenomeProcessor &proc, std::vector<uint32_t> &mapping);
     Creature(const Config &config, Genome &genome, const GenomeProcessor &proc,
-        uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
+        uint64_t id, const Position &pos, angle_t angle, uint64_t spawn_energy);
     static Creature *spawn(const Config &config, Genome &genome,
-        uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
+        uint64_t id, const Position &pos, angle_t angle, uint64_t spawn_energy);
     static Creature *spawn(const Config &config, Random &rand, const Creature &parent,
-        uint64_t id, const Position &pos, angle_t angle, uint32_t spawn_energy);
+        uint64_t id, const Position &pos, angle_t angle, uint64_t spawn_energy);
 
     void pre_process(const Config &config);
     void update_view(uint8_t flags, uint64_t r2, angle_t test);
     void process_detectors(Creature *cr, uint64_t r2, angle_t dir);
     static void process_detectors(Creature *cr1, Creature *cr2);
     void process_food(std::vector<Food> &foods);
-    void post_process();
+    void post_process(const Config &config);
 
-    uint32_t execute_step(const Config &config);
+    uint64_t execute_step(const Config &config);
 
     static Creature *load(const Config &config, InStream &stream, uint64_t next_id, uint64_t *buf);
-    bool load(InStream &stream, uint32_t load_energy, uint64_t *buf);
+    bool load(InStream &stream, uint64_t load_energy, uint64_t *buf);
     void save(OutStream &stream, uint64_t *buf) const;
 };
 
@@ -444,7 +446,7 @@ struct World
 
     size_t tile_index(Position &pos) const;
     void spawn_grass(Tile &tile, uint32_t x, uint32_t y);
-    void spawn_meat(Tile &tile, Position pos, uint32_t energy);
+    void spawn_meat(Tile &tile, Position pos, uint64_t energy);
     void process_tile_pair(Tile &tile1, Tile &tile2);
     void process_detectors();
     void next_step();

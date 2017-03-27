@@ -207,7 +207,7 @@ void Representation::fill_sel_bufs()
 
     sel.fill_sel_genes(world.config,
         buf[inst_gene_bg], buf[inst_gene], count[inst_gene_bg], count[inst_gene]);
-    sel.fill_sel_header(buf[inst_header], count[inst_header]);
+    sel.fill_sel_header(world.config, buf[inst_header], count[inst_header]);
     sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], count[inst_slot_bg], count[inst_slot]);
     sel.fill_sel_levels(buf[inst_level], count[inst_level]);
     sel.fill_sel_links(buf[inst_link], count[inst_link]);
@@ -648,7 +648,7 @@ bool Representation::mouse_down(const SDL_MouseButtonEvent &evt)
 
     case t_show_all:
         sel.skip_unused = !sel.skip_unused;
-        sel.fill_sel_header(buf[inst_header], count[inst_header]);
+        sel.fill_sel_header(world.config, buf[inst_header], count[inst_header]);
         sel.fill_sel_slots(buf[inst_slot_bg], buf[inst_slot], count[inst_slot_bg], count[inst_slot]);
         sel.fill_sel_levels(buf[inst_level], count[inst_level]);
         sel.fill_sel_links(buf[inst_link], count[inst_link]);
@@ -800,7 +800,7 @@ void Representation::update(SDL_Window *window, bool checksum)
     assert(food_ptr == food_end);
     assert(creature_ptr == creature_end);
 
-    sel.fill_sel_header(buf[inst_header], count[inst_header]);
+    sel.fill_sel_header(world.config, buf[inst_header], count[inst_header]);
     sel.fill_sel_levels(buf[inst_level], count[inst_level]);
     sel.fill_sel_limbs(buf[inst_sector], buf[inst_leg], count[inst_sector], count[inst_leg]);
 
