@@ -178,6 +178,15 @@ struct SectorData
         color1(color), color2(fade ? color & 0xFFFFFF : color)
     {
     }
+
+    void set(const Config &config, const Creature &cr, const Creature::Claw &claw)
+    {
+        x = cr.pos.x * draw_scale;
+        y = cr.pos.y * draw_scale;
+        rad = sqrt(claw.rad_sqr) * draw_scale;
+        angle = angle_t(cr.angle + claw.angle);  delta = claw.delta;
+        color1 = color2 = 0x22FF0000;
+    }
 };
 
 struct LegData

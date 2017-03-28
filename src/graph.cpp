@@ -157,6 +157,7 @@ const VertexAttribute layout_panel[] =
 const Representation::PassInfo Representation::pass_info[] =
 {
     INFO(sector,   vtx_sector,   inst_sector,   idx_sector,   true),
+    INFO(sector,   vtx_sector,   inst_attack,   idx_sector,   true),
     INFO(food,     vtx_food,     inst_food,     idx_food,     false),
     INFO(creature, vtx_creature, inst_creature, idx_creature, false),
     INFO(leg,      vtx_leg,      inst_leg,      idx_leg,      true),
@@ -272,7 +273,7 @@ void Representation::make_sector_shape()
 {
     constexpr int n = 4;
     count[idx_sector] = 3 * n;
-    count[inst_sector] = 0;
+    count[inst_sector] = count[inst_attack] = 0;
 
     Vertex vertex[n + 2];
     for(int i = 0; i <= n; i++)vertex[i] = {1, GLfloat(i / double(n))};
@@ -772,20 +773,24 @@ bool Representation::select(int32_t x, int32_t y)
 void Representation::update(SDL_Window *window, bool checksum)
 {
     count[inst_food] = world.total_food_count;
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_ptr = nullptr;
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);  FoodData *food_buf = nullptr;
     glBufferData(GL_ARRAY_BUFFER, count[inst_food] * sizeof(FoodData), nullptr, GL_STREAM_DRAW);
-    if(count[inst_food])food_ptr = static_cast<FoodData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+    if(count[inst_food])food_buf = static_cast<FoodData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
 
     count[inst_creature] = world.total_creature_count;
-    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);  CreatureData *creature_ptr = nullptr;
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);  CreatureData *creature_buf = nullptr;
     glBufferData(GL_ARRAY_BUFFER, count[inst_creature] * sizeof(CreatureData), nullptr, GL_STREAM_DRAW);
-    if(count[inst_creature])creature_ptr = static_cast<CreatureData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+    if(count[inst_creature])creature_buf = static_cast<CreatureData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
 
-#ifndef NDEBUG
-    FoodData *food_end = food_ptr + count[inst_food];
-    CreatureData *creature_end = creature_ptr + count[inst_creature];
-#endif
+    count[inst_attack] = world.total_attack_count;
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_attack]);  SectorData *attack_buf = nullptr;
+    glBufferData(GL_ARRAY_BUFFER, count[inst_attack] * sizeof(SectorData), nullptr, GL_STREAM_DRAW);
+    if(count[inst_attack])attack_buf = static_cast<SectorData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+
     sel.cr = nullptr;
+    FoodData *food_ptr = food_buf;
+    CreatureData *creature_ptr = creature_buf;
+    SectorData *attack_ptr = attack_buf;
     for(const auto &tile : world.tiles)
     {
         for(const auto &food : tile.foods)if(food.type > Food::sprout)
@@ -795,10 +800,13 @@ void Representation::update(SDL_Window *window, bool checksum)
         {
             if(cr->id == sel.id)sel.cr = cr;
             (creature_ptr++)->set(world.config, *cr);
+            for(auto &claw : cr->claws)if(claw.active)
+                (attack_ptr++)->set(world.config, *cr, claw);
         }
     }
-    assert(food_ptr == food_end);
-    assert(creature_ptr == creature_end);
+    assert(food_ptr == food_buf + count[inst_food]);
+    assert(creature_ptr == creature_buf + count[inst_creature]);
+    assert(attack_ptr == attack_buf + count[inst_attack]);
 
     sel.fill_sel_header(world.config, buf[inst_header], count[inst_header]);
     sel.fill_sel_levels(buf[inst_level], count[inst_level]);
@@ -811,14 +819,19 @@ void Representation::update(SDL_Window *window, bool checksum)
         sel.pos = sel.cr->pos;
     }
 
-    if(food_ptr)
+    if(food_buf)
     {
         glBindBuffer(GL_ARRAY_BUFFER, buf[inst_food]);
         glUnmapBuffer(GL_ARRAY_BUFFER);
     }
-    if(creature_ptr)
+    if(creature_buf)
     {
         glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+    }
+    if(attack_buf)
+    {
+        glBindBuffer(GL_ARRAY_BUFFER, buf[inst_attack]);
         glUnmapBuffer(GL_ARRAY_BUFFER);
     }
 
@@ -844,7 +857,7 @@ void Representation::draw()
     glClear(GL_COLOR_BUFFER_BIT);
 
     glEnable(GL_PRIMITIVE_RESTART);  glPrimitiveRestartIndex(255);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     double mul_x = 2 / (cam.width  * cam.scale);
     double mul_y = 2 / (cam.height * cam.scale);

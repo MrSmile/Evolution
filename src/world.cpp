@@ -797,8 +797,8 @@ Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &
     id(id), genome(std::move(genome)), pos(pos), angle(angle),
     energy(std::min(spawn_energy - proc.passive_cost.initial, proc.max_energy)),
     max_energy(proc.max_energy), passive_cost(proc.passive_cost),
-    total_life(proc.max_life), max_life(proc.max_life),
-    damage(0), father(config.base_r2), flags(f_creature)
+    total_life(proc.max_life), max_life(proc.max_life), damage(0),
+    attack_count(0), father(config.base_r2), flags(f_creature)
 {
     uint32_t offset[Slot::invalid], n = 0;
     wombs.reserve(update_counters(proc.count, offset, n, Slot::womb));
@@ -889,14 +889,14 @@ void Creature::pre_process(const Config &config)
     damage = 0;
 }
 
-void Creature::update_view(uint8_t flags, uint64_t r2, angle_t test)
+void Creature::update_view(uint8_t tg_flags, uint64_t r2, angle_t test)
 {
-    for(auto &eye : eyes)if(eye.flags & flags)
+    for(auto &eye : eyes)if(eye.flags & tg_flags)
     {
         if(angle_t(test - eye.angle) > eye.delta)continue;
         if(r2 < eye.rad_sqr)eye.count++;
     }
-    for(auto &radar : radars)if(radar.flags & flags)
+    for(auto &radar : radars)if(radar.flags & tg_flags)
     {
         if(angle_t(test - radar.angle) > radar.delta)continue;
         radar.min_r2 = std::min(radar.min_r2, r2);
@@ -966,7 +966,6 @@ uint64_t Creature::execute_step(const Config &config)
     energy = std::min(energy, max_energy);
     uint64_t total_energy = passive_cost.initial + energy;
 
-    flags = f_creature;
     for(auto &neiron : neirons)neiron.level = 0;
     for(const auto &link : links)
         neirons[link.output].level += link.weight * int16_t(input[link.input]);
@@ -984,10 +983,14 @@ uint64_t Creature::execute_step(const Config &config)
     }
     if(damage)return total_energy;
 
+    attack_count = 0;  flags = f_creature;
     int32_t dx = 0, dy = 0;  angle_t rot = 0;
     uint64_t cost = passive_cost.per_tick;  uint8_t *cur = input.data();
     for(auto &womb : wombs)if((womb.active = *cur++))cost += womb.energy;
-    for(auto &claw : claws)if((claw.active = *cur++))cost += claw.act_cost;
+    for(auto &claw : claws)if((claw.active = *cur++))
+    {
+        cost += claw.act_cost;  attack_count++;
+    }
     for(auto &leg : legs)if(*cur++)
     {
         dx += r_sin(leg.dist_x4, angle + leg.angle + angle_90);
@@ -1047,9 +1050,10 @@ bool Creature::load(InStream &stream, uint64_t load_energy, uint64_t *buf)
     }
 
     uint8_t *cur = input.data();
+    attack_count = 0;  flags = f_creature;
     for(auto &womb : wombs)womb.active = *cur++;
-    for(auto &claw : claws)claw.active = *cur++;
-    cur += legs.size() + rotators.size();  flags = f_creature;
+    for(auto &claw : claws)if((claw.active = *cur++))attack_count++;
+    cur += legs.size() + rotators.size();
     for(auto &sig : signals)if(*cur++)flags |= sig.flags;
     return true;
 }
@@ -1094,7 +1098,7 @@ World::Tile::Tile(const Config &config, const Tile &old, size_t &total_food, siz
 
 
 bool World::Tile::load(const Config &config, InStream &stream, uint32_t x, uint32_t y,
-    uint64_t next_id, size_t &total_food, size_t &total_creature, uint64_t *buf)
+    uint64_t next_id, size_t &total_food, size_t &total_creature, size_t &total_attack, uint64_t *buf)
 {
     assert(foods.empty() && !first);
     uint64_t offs_x = uint64_t(x) << tile_order;
@@ -1121,6 +1125,7 @@ bool World::Tile::load(const Config &config, InStream &stream, uint32_t x, uint3
         }
         *last = cr;  last = &cr->next;
         cr->pos.x |= offs_x;  cr->pos.y |= offs_y;
+        total_attack += cr->attack_count;
     }
     *last = nullptr;  total_creature += creature_count;  return true;
 }
@@ -1264,8 +1269,8 @@ void World::next_step()
     for(size_t i = 0; i < old.size(); i++)
         tiles.emplace_back(config, old[i], total_food_count, spawn_per_tile);
 
-    total_creature_count = 0;
     Creature *del_queue, **del_last = &del_queue;
+    total_creature_count = total_attack_count = 0;
     for(size_t i = 0; i < old.size(); i++)
     {
         spawn_grass(tiles[i], i & config.mask_x, i >> config.order_x);
@@ -1285,7 +1290,8 @@ void World::next_step()
             }
 
             size_t index = tile_index(cr->pos);
-            *tiles[index].last = cr;  tiles[index].last = &cr->next;  total_creature_count++;
+            *tiles[index].last = cr;  tiles[index].last = &cr->next;
+            total_creature_count++;  total_attack_count += cr->attack_count;
             for(const auto &womb : cr->wombs)if(womb.active)
             {
                 Creature *child = Creature::spawn(config, tiles[i].rand, *cr,
@@ -1363,7 +1369,7 @@ void World::init()
     config.capacity_mul = e;
     config.hide_mul = e;
     config.damage_mul = 256;
-    config.life_mul = 256;
+    config.life_mul = 1ul << 16;
     config.life_regen = 8;
     config.eating_cost = 8 * t;
     config.signal_cost = 8 * t;
@@ -1389,9 +1395,9 @@ void World::init()
 
     spawn_per_tile = 4;  // TODO: config?
 
-    total_food_count = total_creature_count = 0;  next_id = 0;
     size_t size = size_t(1) << (config.order_x + config.order_y);
-    tiles.reserve(size);  Genome init_genome(config);
+    total_food_count = total_creature_count = total_attack_count = 0;
+    tiles.reserve(size);  Genome init_genome(config);  next_id = 0;
     for(size_t i = 0; i < size; i++)
     {
         tiles.emplace_back(seed, i);
@@ -1434,13 +1440,13 @@ bool World::load(InStream &stream)
     if(!stream)return false;
 
     size_t size = size_t(1) << (config.order_x + config.order_y);
-    tiles.resize(size);  total_food_count = total_creature_count = 0;
+    tiles.resize(size);  total_food_count = total_creature_count = total_attack_count = 0;
     std::vector<uint64_t> buf(std::max<uint32_t>(1, config.slot_bits >> 6));
     for(size_t i = 0; i < size; i++)
     {
         uint32_t x = i & config.mask_x, y = i >> config.order_x;
         if(!tiles[i].load(config, stream, x, y, next_id,
-            total_food_count, total_creature_count, buf.data()))return false;
+            total_food_count, total_creature_count, total_attack_count, buf.data()))return false;
     }
     process_detectors();  return true;
 }

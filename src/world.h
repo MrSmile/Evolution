@@ -361,7 +361,7 @@ struct Creature
     angle_t angle;
     uint64_t energy, max_energy;
     Config::SlotCost passive_cost;
-    uint32_t total_life, max_life, damage;
+    uint32_t total_life, max_life, damage, attack_count;
     Detector father;
     uint8_t flags;
 
@@ -429,7 +429,7 @@ struct World
         Tile(const Config &config, const Tile &old, size_t &total_food, size_t reserve);
 
         bool load(const Config &config, InStream &stream, uint32_t x, uint32_t y,
-            uint64_t next_id, size_t &total_food, size_t &total_creature, uint64_t *buf);
+            uint64_t next_id, size_t &total_food, size_t &total_creature, size_t &total_attack, uint64_t *buf);
         void save(OutStream &stream, uint64_t *buf) const;
     };
 
@@ -437,7 +437,7 @@ struct World
     Config config;
     uint64_t current_time;
     std::vector<Tile> tiles;
-    size_t total_food_count, total_creature_count;
+    size_t total_food_count, total_creature_count, total_attack_count;
     size_t spawn_per_tile;
     uint64_t next_id;
 
