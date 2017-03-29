@@ -367,7 +367,7 @@ struct Creature
     uint64_t energy, max_energy;
     Config::SlotCost passive_cost;
     mutable std::atomic<uint64_t> food_energy;
-    uint32_t total_life, max_life, damage;
+    uint32_t total_life, max_life, damage, attack_count;
     uint64_t creature_vis_r2[f_creature];
     uint64_t food_vis_r2[2], claw_r2;
     Detector father;
@@ -474,6 +474,7 @@ struct TileLayout
 
 struct FoodData;
 struct CreatureData;
+struct SectorData;
 struct Context;
 
 struct TileGroup
@@ -484,11 +485,12 @@ struct TileGroup
     {
         std::vector<Food> foods;
         Creature *first, **last;
-        uint32_t food_count, creature_count;
+        uint32_t food_count, creature_count, attack_count;
 
         void append(Creature *cr)
         {
             *last = cr;  last = &cr->next;  creature_count++;
+            attack_count += cr->attack_count;
         }
     };
 
@@ -511,7 +513,7 @@ struct TileGroup
         void process_detectors(const Config &config,
             const std::vector<TileGroup> &groups, const Reference &ref);
         void update(const Config &config, uint64_t id, const Creature *&sel,
-            FoodData *food_buf, CreatureData *creature_buf) const;
+            FoodData *food_buf, CreatureData *creature_buf, SectorData *attack_buf) const;
         bool hit_test(const Position pos, uint64_t max_r2, const Creature *&sel, uint64_t prev_id) const;
 
         bool load(const Config &config, InStream &stream, uint64_t next_id, uint64_t *buf);
@@ -538,7 +540,8 @@ struct TileGroup
 
     const Creature *update(const Config &config, uint64_t id,
         FoodData *food_buf, const std::vector<size_t> &food_offs,
-        CreatureData *creature_buf, const std::vector<size_t> &creature_offs) const;
+        CreatureData *creature_buf, const std::vector<size_t> &creature_offs,
+        SectorData *attack_buf, const std::vector<size_t> &attack_offs) const;
 
     static void thread_proc(Context *context, uint32_t index);
 };
@@ -559,7 +562,8 @@ struct Context
 
     FoodData *food_buf;
     CreatureData *creature_buf;
-    std::vector<size_t> food_offs, creature_offs;
+    SectorData *attack_buf;
+    std::vector<size_t> food_offs, creature_offs, attack_offs;
     uint64_t current_time, sel_id;
     const Creature *sel;
 
@@ -600,7 +604,7 @@ struct World : public Context
     void stop();
 
     void count_objects();
-    const Creature *update(FoodData *food_buf, CreatureData *creature_buf, uint64_t sel_id);
+    const Creature *update(FoodData *food_buf, CreatureData *creature_buf, SectorData *attack_buf, uint64_t sel_id);
     const Creature *hit_test(const Position &pos, uint32_t rad, uint64_t prev_id) const;
 
     bool load(InStream &stream);
@@ -614,6 +618,11 @@ struct World : public Context
     size_t creature_total() const
     {
         return *creature_offs.rbegin();
+    }
+
+    size_t attack_total() const
+    {
+        return *attack_offs.rbegin();
     }
 
     const Tile &get_tile(uint32_t index) const

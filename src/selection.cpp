@@ -420,7 +420,7 @@ void Representation::Selection::fill_sel_limbs(GLuint buf_sector, GLuint buf_leg
         {
         case Slot::claw:
             data_sector.emplace_back(*cr, slots[i].angle1, slots[i].angle2,
-                slots[i].radius * scale, alpha | 0xFF0000, false);  break;
+                slots[i].radius * scale, alpha | 0xFFFF00, false);  break;
 
         case Slot::leg:
             {

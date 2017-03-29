@@ -157,6 +157,7 @@ const VertexAttribute layout_panel[] =
 const Representation::PassInfo Representation::pass_info[] =
 {
     INFO(sector,   vtx_sector,   inst_sector,   idx_sector,   true),
+    INFO(sector,   vtx_sector,   inst_attack,   idx_sector,   true),
     INFO(food,     vtx_food,     inst_food,     idx_food,     false),
     INFO(creature, vtx_creature, inst_creature, idx_creature, false),
     INFO(leg,      vtx_leg,      inst_leg,      idx_leg,      true),
@@ -272,7 +273,7 @@ void Representation::make_sector_shape()
 {
     constexpr int n = 4;
     count[idx_sector] = 3 * n;
-    count[inst_sector] = 0;
+    count[inst_sector] = count[inst_attack] = 0;
 
     Vertex vertex[n + 2];
     for(int i = 0; i <= n; i++)vertex[i] = {1, GLfloat(i / double(n))};
@@ -767,7 +768,12 @@ void Representation::update(SDL_Window *window, bool checksum, bool draw)
     glBufferData(GL_ARRAY_BUFFER, count[inst_creature] * sizeof(CreatureData), nullptr, GL_STREAM_DRAW);
     if(count[inst_creature])creature_buf = static_cast<CreatureData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
 
-    sel.cr = world.update(food_buf, creature_buf, sel.id);
+    count[inst_attack] = world.attack_total();
+    glBindBuffer(GL_ARRAY_BUFFER, buf[inst_attack]);  SectorData *attack_buf = nullptr;
+    glBufferData(GL_ARRAY_BUFFER, count[inst_attack] * sizeof(SectorData), nullptr, GL_STREAM_DRAW);
+    if(count[inst_attack])attack_buf = static_cast<SectorData *>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
+
+    sel.cr = world.update(food_buf, creature_buf, attack_buf, sel.id);
     sel.fill_sel_header(world.config, buf[inst_header], count[inst_header]);
     sel.fill_sel_levels(buf[inst_level], count[inst_level]);
     sel.fill_sel_limbs(buf[inst_sector], buf[inst_leg], count[inst_sector], count[inst_leg]);
@@ -789,6 +795,11 @@ void Representation::update(SDL_Window *window, bool checksum, bool draw)
         glBindBuffer(GL_ARRAY_BUFFER, buf[inst_creature]);
         glUnmapBuffer(GL_ARRAY_BUFFER);
     }
+    if(attack_buf)
+    {
+        glBindBuffer(GL_ARRAY_BUFFER, buf[inst_attack]);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+    }
 }
 
 void Representation::draw()
@@ -798,7 +809,7 @@ void Representation::draw()
     glClear(GL_COLOR_BUFFER_BIT);
 
     glEnable(GL_PRIMITIVE_RESTART);  glPrimitiveRestartIndex(255);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     double mul_x = 2 / (cam.width  * cam.scale);
     double mul_y = 2 / (cam.height * cam.scale);

@@ -815,7 +815,7 @@ Creature::Creature(const Config &config, Genome &genome, const GenomeProcessor &
     energy(std::min(spawn_energy - proc.passive_cost.initial, proc.max_energy)),
     max_energy(proc.max_energy), passive_cost(proc.passive_cost), food_energy(0),
     total_life(proc.max_life), max_life(proc.max_life), damage(0),
-    creature_vis_r2{}, food_vis_r2{}, claw_r2(0),
+    attack_count(0), creature_vis_r2{}, food_vis_r2{}, claw_r2(0),
     father(config.base_r2), flags(f_creature)
 {
     uint32_t offset[Slot::invalid], n = 0;
@@ -999,7 +999,6 @@ uint64_t Creature::execute_step(const Config &config)
     uint64_t total_energy = passive_cost.initial + energy;
     food_energy = 0;
 
-    flags = f_creature;
     for(auto &neiron : neirons)neiron.level = 0;
     for(const auto &link : links)
         neirons[link.output].level += link.weight * int16_t(input[link.input]);
@@ -1017,12 +1016,14 @@ uint64_t Creature::execute_step(const Config &config)
     }
     if(damage)return total_energy;
 
-    int32_t dx = 0, dy = 0;  angle_t rot = 0;  claw_r2 = 0;
+    int32_t dx = 0, dy = 0;  angle_t rot = 0;
+    attack_count = 0;  claw_r2 = 0;  flags = f_creature;
     uint64_t cost = passive_cost.per_tick;  uint8_t *cur = input.data();
     for(auto &womb : wombs)if((womb.active = *cur++))cost += womb.energy;
     for(auto &claw : claws)if((claw.active = *cur++))
     {
-        claw_r2 = std::max(claw_r2, claw.rad_sqr);  cost += claw.act_cost;
+        cost += claw.act_cost;  attack_count++;
+        claw_r2 = std::max(claw_r2, claw.rad_sqr);
     }
     for(auto &leg : legs)if(*cur++)
     {
@@ -1083,10 +1084,12 @@ bool Creature::load(InStream &stream, uint64_t load_energy, uint64_t *buf)
     }
 
     uint8_t *cur = input.data();
-    flags = f_creature;  claw_r2 = 0;
+    attack_count = 0;  claw_r2 = 0;  flags = f_creature;
     for(auto &womb : wombs)womb.active = *cur++;
     for(auto &claw : claws)if((claw.active = *cur++))
-        claw_r2 = std::max(claw_r2, claw.rad_sqr);
+    {
+        claw_r2 = std::max(claw_r2, claw.rad_sqr);  attack_count++;
+    }
     cur += legs.size() + rotators.size();
     for(auto &sig : signals)if(*cur++)flags |= sig.flags;
     return true;
@@ -1250,7 +1253,7 @@ void TileGroup::execute_step(const Config &config)
     for(auto &buf : buffers)
     {
         buf.foods.clear();  buf.last = &buf.first;
-        buf.food_count = buf.creature_count = 0;
+        buf.food_count = buf.creature_count = buf.attack_count = 0;
     }
 
     Creature **del_last = &del_queue;
@@ -1262,8 +1265,9 @@ void TileGroup::execute_step(const Config &config)
         foods.resize(tile.spawn_start = tile.food_count = n);
         spawn_grass(config, tile);
 
-        uint64_t id = next_id;  Creature *ptr = tile.first;
-        tile.last = &tile.first;  tile.creature_count = 0;
+        uint64_t id = next_id;
+        Creature *ptr = tile.first;  tile.last = &tile.first;
+        tile.creature_count = tile.attack_count = 0;
         while(ptr)
         {
             Creature *cr = ptr;  ptr = ptr->next;
@@ -1336,6 +1340,7 @@ void TileGroup::consolidate(const std::vector<Reference> &layout, std::vector<Ti
             if(!buf.creature_count)continue;
             *tile.last = buf.first;  tile.last = buf.last;
             tile.creature_count += buf.creature_count;
+            tile.attack_count += buf.attack_count;
         }
         if(first_child)
         {
@@ -1392,8 +1397,8 @@ void TileGroup::process_detectors(const Config &config,
 }
 
 
-void TileGroup::Tile::update(const Config &config, uint64_t id,
-    const Creature *&sel, FoodData *food_buf, CreatureData *creature_buf) const
+void TileGroup::Tile::update(const Config &config, uint64_t id, const Creature *&sel,
+    FoodData *food_buf, CreatureData *creature_buf, SectorData *attack_buf) const
 {
     FoodData *food_ptr = food_buf;
     for(const auto &food : foods)if(food.type > Food::sprout)
@@ -1401,17 +1406,22 @@ void TileGroup::Tile::update(const Config &config, uint64_t id,
     assert(food_ptr == food_buf + food_count);
 
     CreatureData *creature_ptr = creature_buf;
+    SectorData *attack_ptr = attack_buf;
     for(const Creature *cr = first; cr; cr = cr->next)
     {
         if(cr->id == id)sel = cr;
         (creature_ptr++)->set(config, *cr);
+        for(auto &claw : cr->claws)if(claw.active)
+            (attack_ptr++)->set(config, *cr, claw);
     }
     assert(creature_ptr == creature_buf + creature_count);
+    assert(attack_ptr == attack_buf + attack_count);
 }
 
 const Creature *TileGroup::update(const Config &config, uint64_t id,
     FoodData *food_buf, const std::vector<size_t> &food_offs,
-    CreatureData *creature_buf, const std::vector<size_t> &creature_offs) const
+    CreatureData *creature_buf, const std::vector<size_t> &creature_offs,
+    SectorData *attack_buf, const std::vector<size_t> &attack_offs) const
 {
     const Creature *sel = nullptr;
     for(auto &tile : tiles)
@@ -1419,7 +1429,10 @@ const Creature *TileGroup::update(const Config &config, uint64_t id,
         uint32_t index = tile.x | (tile.y << config.order_x);
         assert(food_offs[index + 1] - food_offs[index] == tile.food_count);
         assert(creature_offs[index + 1] - creature_offs[index] == tile.creature_count);
-        tile.update(config, id, sel, food_buf + food_offs[index], creature_buf + creature_offs[index]);
+        assert(attack_offs[index + 1] - attack_offs[index] == tile.attack_count);
+
+        tile.update(config, id, sel, food_buf + food_offs[index],
+            creature_buf + creature_offs[index], attack_buf + attack_offs[index]);
     }
     return sel;
 }
@@ -1455,7 +1468,9 @@ void TileGroup::thread_proc(Context *context, uint32_t index)
     case Context::c_draw:
         {
             const Creature *sel = group.update(context->config, context->sel_id,
-                context->food_buf, context->food_offs, context->creature_buf, context->creature_offs);
+                context->food_buf, context->food_offs,
+                context->creature_buf, context->creature_offs,
+                context->attack_buf, context->attack_offs);
             cmd = context->end_draw(stage, sel);  continue;
         }
 
@@ -1482,6 +1497,7 @@ bool TileGroup::Tile::load(const Config &config, InStream &stream, uint64_t next
         if(food.type > Food::sprout)food_count++;
     }
 
+    attack_count = 0;
     for(uint32_t i = 0; i < creature_count; i++)
     {
         Creature *cr = Creature::load(config, stream, next_id, buf);
@@ -1491,6 +1507,7 @@ bool TileGroup::Tile::load(const Config &config, InStream &stream, uint64_t next
         }
         *last = cr;  last = &cr->next;
         cr->pos.x |= offs_x;  cr->pos.y |= offs_y;
+        attack_count += cr->attack_count;
     }
     *last = nullptr;  return true;
 }
@@ -1640,7 +1657,7 @@ void World::init()
     config.capacity_mul = e;
     config.hide_mul = e;
     config.damage_mul = 256;
-    config.life_mul = 256;
+    config.life_mul = 1ul << 16;
     config.life_regen = 8;
     config.eating_cost = 8 * t;
     config.signal_cost = 8 * t;
@@ -1694,7 +1711,7 @@ void World::init()
                 next_id++, Position{xx, yy}, angle, uint64_t(-1));
             *tile.last = cr;  tile.last = &cr->next;
         }
-        *tile.last = nullptr;  tile.creature_count = n;
+        *tile.last = nullptr;  tile.creature_count = n;  tile.attack_count = 0;
     }
     for(auto &group : groups)
     {
@@ -1725,6 +1742,7 @@ void World::build_layout()
 
     food_offs.resize(layout.size() + 1);
     creature_offs.resize(layout.size() + 1);
+    attack_offs.resize(layout.size() + 1);
 }
 
 
@@ -1754,18 +1772,19 @@ void World::stop()
 
 void World::count_objects()
 {
-    food_offs[0] = creature_offs[0] = 0;
-    size_t food_count = 0, creature_count = 0;
+    food_offs[0] = creature_offs[0] = attack_offs[0] = 0;
+    size_t food_count = 0, creature_count = 0, attack_count = 0;
     for(size_t i = 0; i < layout.size(); i++)
     {
         Tile &tile = groups[layout[i].group].tiles[layout[i].index];
 
         food_offs[i + 1] = food_count += tile.food_count;
         creature_offs[i + 1] = creature_count += tile.creature_count;
+        attack_offs[i + 1] = attack_count += tile.attack_count;
     }
 }
 
-const Creature *World::update(FoodData *food_buf, CreatureData *creature_buf, uint64_t sel_id)
+const Creature *World::update(FoodData *food_buf, CreatureData *creature_buf, SectorData *attack_buf, uint64_t sel_id)
 {
     // count_objects() should be called prior
 
@@ -1773,6 +1792,7 @@ const Creature *World::update(FoodData *food_buf, CreatureData *creature_buf, ui
     Context::sel_id = sel_id;
     Context::food_buf = food_buf;
     Context::creature_buf = creature_buf;
+    Context::attack_buf = attack_buf;
 
     post_execute(c_draw);  pre_execute();  return sel;
 }

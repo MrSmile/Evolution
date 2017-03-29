@@ -48,7 +48,7 @@ class Representation
 
     enum Pass
     {
-        pass_sector, pass_food, pass_creature, pass_leg, pass_sel,
+        pass_sector, pass_attack, pass_food, pass_creature, pass_leg, pass_sel,
         pass_slot_bg, pass_gene_bg, pass_slot, pass_level, pass_link, pass_gene, pass_header, pass_panel,
         pass_count
     };
@@ -56,7 +56,7 @@ class Representation
     enum Buffer
     {
         vtx_food, idx_food, inst_food, vtx_creature, idx_creature, inst_creature,
-        vtx_sector, idx_sector, inst_sector, vtx_leg, idx_leg, inst_leg, vtx_sel, idx_sel,
+        vtx_sector, idx_sector, inst_sector, inst_attack, vtx_leg, idx_leg, inst_leg, vtx_sel, idx_sel,
         vtx_quad, inst_slot_bg, inst_gene_bg, inst_slot, inst_level, inst_link, inst_gene, inst_header,
         vtx_panel, idx_panel,
         buf_count
