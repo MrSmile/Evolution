@@ -211,24 +211,14 @@ Genome::Gene::Gene(const Config &config, uint32_t slot, int32_t weight, uint32_t
 
 Genome::Genome(const Config &config)
 {
-    genes.emplace_back(config, 0, Slot::mouth,     0,   0,   0,   0, 0);
-    genes.emplace_back(config, 1, Slot::stomach, 255,   0,   0,   0, 0);
-    genes.emplace_back(config, 2, Slot::womb,     63,   0,   0,   0, 0);
-    genes.emplace_back(config, 3, Slot::eye,       0, -12,  -4,  64, Creature::f_grass);
-    genes.emplace_back(config, 4, Slot::eye,       0,  -4,   4,  64, Creature::f_grass);
-    genes.emplace_back(config, 5, Slot::eye,       0,   4,  12,  64, Creature::f_grass);
-    genes.emplace_back(config, 6, Slot::leg,     255,   0,   0,   0, 0);
-    genes.emplace_back(config, 7, Slot::rotator,   0,   0,  -8,   0, 0);
-    genes.emplace_back(config, 8, Slot::rotator,   0,   0,   8,   0, 0);
+    genes.emplace_back(config, 0, Slot::mouth,     0, 0, 0, 0, 0);
+    genes.emplace_back(config, 1, Slot::stomach, 255, 0, 0, 0, 0);
+    genes.emplace_back(config, 2, Slot::womb,     63, 0, 0, 0, 0);
+    genes.emplace_back(config, 3, Slot::leg,     255, 0, 0, 0, 0);
 
     genes.emplace_back(config, 0,  -64, 9, 255);
     genes.emplace_back(config, 2,   64, 1, 250);
-    genes.emplace_back(config, 6,   64, 4,   0);
-    genes.emplace_back(config, 7,    1, 3,   0);
-    genes.emplace_back(config, 7, -128, 4,   0);
-    genes.emplace_back(config, 8, -128, 3,   0);
-    genes.emplace_back(config, 8, -128, 4,   0);
-    genes.emplace_back(config, 8,   -1, 9,   1);
+    genes.emplace_back(config, 3,  -64, 9, 255);
 
     chromosomes.resize(size_t(1) << config.chromosome_bits);
     chromosomes[0] = genes.size();
@@ -1623,7 +1613,7 @@ World::~World()
 
 void World::init()
 {
-    config.order_x = config.order_y = 5;  // 32 x 32
+    config.order_x = config.order_y = 6;  // 64 x 64
     config.base_radius = tile_size / 64;
 
     config.chromosome_bits = 4;  // 16 = 8 pair
@@ -1635,9 +1625,9 @@ void World::init()
     config.slot_bits = 6;  // 64 slots
     config.base_bits = 8;
 
-    uint64_t e = uint64_t(1) << 32, t = e >> 8;
-    config.base_cost = {e >> 3, t >> 3};
-    config.gene_cost = {e >> 3, t >> 3};
+    uint64_t e = uint64_t(1) << 24, t = e >> 10;
+    config.base_cost = {16 * e, 16 * t};
+    config.gene_cost = {e >> 6, t >> 6};
 
     config.cost[Slot::womb]    = {e, 0};
     config.cost[Slot::claw]    = {e, 0};
@@ -1646,8 +1636,8 @@ void World::init()
     config.cost[Slot::mouth]   = {e, 0};
     config.cost[Slot::signal]  = {e, 0};
 
-    config.cost[Slot::stomach] = {e, 0};
-    config.cost[Slot::hide]    = {e, 0};
+    config.cost[Slot::stomach] = {e, t};
+    config.cost[Slot::hide]    = {e, t};
     config.cost[Slot::eye]     = {e, t};
     config.cost[Slot::radar]   = {e, t};
 
@@ -1658,17 +1648,17 @@ void World::init()
     config.hide_mul = e;
     config.damage_mul = 256;
     config.life_mul = 1ul << 16;
-    config.life_regen = 8;
+    config.life_regen = 64;
     config.eating_cost = 8 * t;
     config.signal_cost = 8 * t;
     config.speed_mul = tile_size >> 14;
     config.rotate_mul = 8 * config.speed_mul;
     config.mass_order = 2 * tile_order - 38;
 
-    config.food_energy = 16 * e;
-    config.exp_sprout_per_tile  = ~(uint32_t(-1) / 64);
-    config.exp_sprout_per_grass = ~(uint32_t(-1) / 64);
-    config.repression_range = tile_size / 16;
+    config.food_energy = 8 * e;
+    config.exp_sprout_per_tile  = ~(uint32_t(-1) / 1024);
+    config.exp_sprout_per_grass = ~(uint32_t(-1) / 256);
+    config.repression_range = tile_size / 32;
     config.sprout_dist_x4 = 5 * config.repression_range;
     config.meat_dist_x4 = tile_size / 16;
 
@@ -1677,8 +1667,9 @@ void World::init()
 
 
     uint64_t seed = 1234;
-    uint32_t exp_grass_gen    = uint32_t(-1) >> 16;
-    uint32_t exp_creature_gen = uint32_t(-1) >> 16;
+    uint32_t exp_grass_gen    = uint32_t(-1) >> 8;
+    uint32_t exp_creature_gen = uint32_t(-1) >> 4;
+    int grass_gen_mul = 16;
 
 
     build_layout();
@@ -1691,7 +1682,9 @@ void World::init()
         uint64_t offs_x = uint64_t(tile.x) << tile_order;
         uint64_t offs_y = uint64_t(tile.y) << tile_order;
 
-        uint32_t n = tile.rand.poisson(exp_grass_gen);
+        uint32_t n = 0;
+        for(int k = 0; k < grass_gen_mul; k++)
+            n += tile.rand.poisson(exp_grass_gen);
         for(uint32_t k = 0; k < n; k++)
         {
             uint64_t xx = (tile.rand.uint32() & tile_mask) | offs_x;
